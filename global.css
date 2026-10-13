@@ -1,0 +1,158 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import 'panelui-native/theme.css';
+
+/* Tailwind only generates the classes it can see, and the components live in
+   the package rather than in this project — without this line every one of
+   them renders unstyled, which reads like a broken install. 
+   
+   In a monorepo, node_modules may be hoisted to the workspace root. */
+@source '../../node_modules/panelui-native/src';
+@source './node_modules/panelui-native/src';
+
+/* ============================================================================
+   PATULOD Brand Colors Override
+   Based on official brand banner
+   ============================================================================ */
+
+@layer theme {
+  :root {
+    /* PATULOD Primary Brand Color - Forest Green */
+    --color-primary: #0d5f3a;
+    --color-primary-hover: #094d2e;
+    --color-primary-foreground: #ffffff;
+    
+    /* Extended Primary Green Scale */
+    --color-primary-50: #e8f5f0;
+    --color-primary-100: #c2e4d5;
+    --color-primary-200: #9ad3ba;
+    --color-primary-300: #71c19f;
+    --color-primary-400: #49af84;
+    --color-primary-500: #0d5f3a;
+    --color-primary-600: #0a4d2f;
+    --color-primary-700: #083b23;
+    --color-primary-800: #052918;
+    --color-primary-900: #03170d;
+    
+    /* Secondary - subtle backgrounds */
+    --color-secondary: rgba(13, 95, 58, 0.1);
+    --color-secondary-foreground: #0d5f3a;
+    
+    /* Accent/Secondary - Yellow/Gold */
+    --color-accent: #fbbf24;
+    --color-accent-hover: #f59e0b;
+    --color-accent-foreground: #000000;
+    
+    /* Success - Light green */
+    --color-success: #10b981;
+    --color-success-hover: #059669;
+    --color-success-foreground: #ffffff;
+    --color-success-solid-foreground: #ffffff;
+    --color-success-soft: rgba(16, 185, 129, 0.1);
+    --color-success-subtle: rgba(16, 185, 129, 0.05);
+    
+    /* Info - Blue */
+    --color-info: #3b82f6;
+    --color-info-foreground: #1e40af;
+    --color-info-solid-foreground: #ffffff;
+    --color-info-soft: rgba(59, 130, 246, 0.1);
+    --color-info-subtle: rgba(59, 130, 246, 0.05);
+    
+    /* Warning - Orange */
+    --color-warning: #f59e0b;
+    --color-warning-hover: #d97706;
+    --color-warning-foreground: #92400e;
+    --color-warning-solid-foreground: #ffffff;
+    --color-warning-soft: rgba(245, 158, 11, 0.1);
+    --color-warning-subtle: rgba(245, 158, 11, 0.05);
+    
+    /* Destructive/Error - Red */
+    --color-destructive: #ef4444;
+    --color-destructive-hover: #dc2626;
+    --color-destructive-foreground: #991b1b;
+    --color-destructive-solid-foreground: #ffffff;
+    --color-destructive-soft: rgba(239, 68, 68, 0.1);
+    --color-destructive-subtle: rgba(239, 68, 68, 0.05);
+    
+    /* Background & Surface Colors - Light cream/off-white */
+    --color-background: #fefdfb;
+    --color-foreground: #1a1a1a;
+    --color-card: #ffffff;
+    --color-card-foreground: #1a1a1a;
+    --color-surface: #f5f5f3;
+    --color-surface-hover: #ececea;
+    --color-surface-secondary: #f5f5f3;
+    --color-surface-tertiary: #ececea;
+    
+    /* Popover & Overlay */
+    --color-popover: #ffffff;
+    --color-popover-foreground: #1a1a1a;
+    --color-overlay: #ffffff;
+    --color-overlay-foreground: #1a1a1a;
+    --color-inset: rgba(0, 0, 0, 0.035);
+    
+    /* Muted - for subtle text and backgrounds */
+    --color-muted: #f3f3f1;
+    --color-muted-foreground: #6b7280;
+    
+    /* Border Colors */
+    --color-border: #e5e5e3;
+    --color-input: #e5e5e3;
+    --color-ring: #0d5f3a;
+    
+    /* Code syntax highlighting colors */
+    --color-code-keyword: #d73a49;
+    --color-code-string: #032f62;
+    --color-code-number: #005cc5;
+    --color-code-comment: #6a737d;
+    --color-code-function: #6f42c1;
+    --color-code-property: #005cc5;
+    --color-code-punctuation: #24292e;
+    --color-code-deleted: #b31d28;
+    --color-code-inserted: #22863a;
+    
+    /* Chart colors */
+    --color-chart-1: #0d5f3a;
+    --color-chart-2: #fbbf24;
+    --color-chart-3: #10b981;
+    --color-chart-4: #3b82f6;
+    --color-chart-5: #f59e0b;
+    
+    /* Skeleton/loading */
+    --color-skeleton: rgba(0, 0, 0, 0.08);
+  }
+  
+  /* Dark Mode PATULOD Theme */
+  .dark {
+    --color-background: #0f1910;
+    --color-foreground: #f8fafc;
+    --color-card: #1a2820;
+    --color-card-foreground: #f8fafc;
+    --color-surface: #1a2820;
+    --color-surface-hover: #243830;
+    --color-surface-secondary: #1a2820;
+    --color-surface-tertiary: #243830;
+    
+    --color-primary: #10b981;
+    --color-primary-hover: #059669;
+    
+    --color-secondary: rgba(16, 185, 129, 0.1);
+    --color-secondary-foreground: #10b981;
+    
+    --color-popover: #1a2820;
+    --color-popover-foreground: #f8fafc;
+    --color-overlay: #1a2820;
+    --color-overlay-foreground: #f8fafc;
+    --color-inset: rgba(255, 255, 255, 0.05);
+    
+    --color-muted: #1a2820;
+    --color-muted-foreground: #94a3b8;
+    
+    --color-border: #243830;
+    --color-input: #243830;
+    --color-ring: #10b981;
+    
+    --color-skeleton: rgba(255, 255, 255, 0.1);
+  }
+}
+
