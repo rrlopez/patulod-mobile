@@ -1,4 +1,4 @@
-import { ScrollView, View, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import { ScrollView, View, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -17,6 +17,8 @@ import {
   AlertCircle,
   ChevronRight,
 } from 'lucide-react-native';
+import { api } from '../lib/api';
+import { setUser } from '../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 const ERROR_RED = '#dc2626';
@@ -98,13 +100,25 @@ export default function Register() {
   // Mock submit state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
 
   const fieldStatus = {
-    fullName: touched.fullName ? validate('fullName', fullName) : { state: 'idle' as FieldState },
-    email: touched.email ? validate('email', email) : { state: 'idle' as FieldState },
-    phone: touched.phone ? validate('phone', phone) : { state: 'idle' as FieldState },
-    password: touched.password ? validate('password', password) : { state: 'idle' as FieldState },
-    confirmPassword: touched.confirmPassword
+    fullName: serverErrors.fullName 
+      ? { state: 'error' as FieldState, message: serverErrors.fullName }
+      : touched.fullName ? validate('fullName', fullName) : { state: 'idle' as FieldState },
+    email: serverErrors.email
+      ? { state: 'error' as FieldState, message: serverErrors.email }
+      : touched.email ? validate('email', email) : { state: 'idle' as FieldState },
+    phone: serverErrors.phone
+      ? { state: 'error' as FieldState, message: serverErrors.phone }
+      : touched.phone ? validate('phone', phone) : { state: 'idle' as FieldState },
+    password: serverErrors.password
+      ? { state: 'error' as FieldState, message: serverErrors.password }
+      : touched.password ? validate('password', password) : { state: 'idle' as FieldState },
+    confirmPassword: serverErrors.confirmPassword
+      ? { state: 'error' as FieldState, message: serverErrors.confirmPassword }
+      : touched.confirmPassword
       ? confirmPassword === password && confirmPassword.length > 0
         ? { state: 'valid' as FieldState }
         : { state: 'error' as FieldState, message: 'Passwords do not match.' }
@@ -123,19 +137,56 @@ export default function Register() {
 
   function handleBlur(field: string) {
     setTouched(prev => ({ ...prev, [field]: true }));
+    // Clear server error for this field when user starts editing again
+    if (serverErrors[field]) {
+      setServerErrors(prev => {
+        const updated = { ...prev };
+        delete updated[field];
+        return updated;
+      });
+    }
   }
 
-  function handleSubmit() {
+  async function handleSubmit() {
     // Touch all fields to surface any remaining errors
     setTouched({ fullName: true, email: true, phone: true, password: true, confirmPassword: true });
     if (!allFieldsValid) return;
 
-    // Mock submit
     setIsSubmitting(true);
-    setTimeout(() => {
+    setSubmitError(null);
+    setServerErrors({});
+
+    try {
+      const response = await api.register({
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.replace(/\s/g, ''), // Remove spaces
+        password,
+        confirmPassword,
+        termsVersion: '1.0',
+        privacyVersion: '1.0',
+      });
+
+      if (response.success && response.user) {
+        // Update auth store
+        setUser(response.user);
+        setSubmitSuccess(true);
+      } else if (response.errors) {
+        // Show field-specific validation errors from server
+        setServerErrors(response.errors);
+      } else {
+        setSubmitError(response.error || 'Registration failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      setSubmitError(
+        error instanceof Error 
+          ? error.message 
+          : 'Network error. Please check your connection and try again.'
+      );
+    } finally {
       setIsSubmitting(false);
-      setSubmitSuccess(true);
-    }, 1500);
+    }
   }
 
   // ── Success state ──────────────────────────────────────────────
@@ -152,22 +203,22 @@ export default function Register() {
           <CheckCircle2 size={40} color={SUCCESS_GREEN} strokeWidth={2} />
         </View>
         <View className="items-center gap-2">
-          <Text size="2xl" weight="bold" style={{ color: PRIMARY_GREEN }}>Account Created!</Text>
+          <Text size="2xl" weight="bold" style={{ color: PRIMARY_GREEN }}>Welcome to PATULOD!</Text>
           <Text size="sm" className="text-muted-foreground text-center leading-relaxed">
-            Welcome to PATULOD. Your passenger account has been registered. You can now log in to start booking rides.
+            Your passenger account has been created successfully. You can now start booking rides.
           </Text>
         </View>
         <Button
           size="lg"
           className="w-full"
           style={{ backgroundColor: PRIMARY_GREEN }}
-          onPress={() => router.replace('/login')}
+          onPress={() => {
+            router.dismissAll();
+            router.replace('/(passenger)/home');
+          }}
         >
-          <Text size="base" weight="bold" className="text-white">Continue to Login</Text>
+          <Text size="base" weight="bold" className="text-white">Get Started</Text>
         </Button>
-        <Text size="xs" className="text-muted-foreground text-center">
-          Phase 0.5 — Mock registration. No account is actually created.
-        </Text>
       </View>
     );
   }
@@ -216,6 +267,24 @@ export default function Register() {
               </Text>
             </Text>
           </View>
+
+          {/* ===== GENERAL ERROR MESSAGE ===== */}
+          {submitError && (
+            <View
+              className="rounded-xl p-4 flex-row items-start gap-3"
+              style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fca5a5' }}
+            >
+              <AlertCircle size={20} color={ERROR_RED} strokeWidth={2} style={{ marginTop: 1 }} />
+              <View className="flex-1">
+                <Text size="sm" weight="semibold" style={{ color: ERROR_RED }}>
+                  Registration Failed
+                </Text>
+                <Text size="xs" style={{ color: ERROR_RED, marginTop: 4 }}>
+                  {submitError}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* ===== FORM FIELDS ===== */}
           <View className="gap-5">

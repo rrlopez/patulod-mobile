@@ -12,21 +12,24 @@ import {
   AlertCircle,
   CheckCircle2,
 } from 'lucide-react-native';
+import { api } from '../lib/api';
+import { setUser } from '../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 const ERROR_RED = '#dc2626';
 
 /**
  * Login Screen
- * Phase 0.5 — Mock UI
+ * Phase 1 — Real Backend Integration
  *
  * Per master-plan.md Phase 1:
  * - Email + Password (show/hide)
  * - Generic error on failure (no field-level hints that leak account existence)
  * - Forgot password link
  * - PATULOD-themed
- * - Mock: any non-empty email + password navigates to passenger home
- *   Mock "wrong" credentials: email = "fail@test.com" shows error state
+ * - Connects to /api/mobile/auth/login
+ * - Handles suspended/inactive accounts
+ * - Routes based on user role from server
  */
 export default function Login() {
   const insets = useSafeAreaInsets();
@@ -53,29 +56,60 @@ export default function Login() {
 
     setIsSubmitting(true);
 
-    // Mock: simulate network delay
-    setTimeout(() => {
-      setIsSubmitting(false);
+    // Call real backend API
+    api.login({
+      email: email.trim(),
+      password: password,
+    })
+      .then(response => {
+        if (response.success && response.user) {
+          // Store user in auth store
+          setUser(response.user);
 
-      // Mock failure trigger for demo purposes
-      if (email.trim().toLowerCase() === 'fail@test.com') {
-        setGenericError('Incorrect email or password. Please try again.');
-        return;
-      }
-
-      // Route based on email (dev-only)
-      const emailLower = email.trim().toLowerCase();
-      if (emailLower === 'apply@patulod.com') {
-        // Driver application not yet approved → status screen
-        router.replace('/driver-status');
-      } else if (emailLower === 'driver@patulod.com') {
-        // Approved driver → driver dashboard
-        router.replace('/(driver)/home');
-      } else {
-        // Default to passenger (includes rider@patulod.com or any other email)
-        router.replace('/(passenger)/home');
-      }
-    }, 1200);
+          // Route based on actual user role from server
+          router.dismissAll();
+          if (response.user.role === 'DRIVER') {
+            // Check driver application status
+            if (response.user.driverApplicationStatus === 'APPROVED') {
+              // Approved drivers go to driver home
+              router.replace('/(driver)/home');
+            } else {
+              // PENDING, REJECTED, or DOCUMENTS_NEEDED drivers go to application status
+              router.replace('/driver-status');
+            }
+          } else {
+            // Passengers go to passenger home
+            router.replace('/(passenger)/home');
+          }
+        } else {
+          // Show the actual error message from backend
+          // Backend returns specific messages for different scenarios:
+          // - Invalid credentials
+          // - Suspended account (with reason)
+          // - Inactive account
+          if (response.error) {
+            setGenericError(response.error);
+            if (response.reason) {
+              // Append suspension reason if provided
+              setGenericError(`${response.error}: ${response.reason}`);
+            }
+          } else {
+            setGenericError('Incorrect email or password. Please try again.');
+          }
+        }
+      })
+      .catch(error => {
+        console.error('Login error:', error);
+        // Only network/timeout errors should reach here now
+        setGenericError(
+          error instanceof Error && error.message
+            ? error.message
+            : 'Network error. Please check your connection and try again.'
+        );
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
   }
 
   return (
@@ -250,23 +284,6 @@ export default function Login() {
                 </Text>
               </TouchableOpacity>
             </View>
-          </View>
-
-          {/* ===== MOCK HINT ===== */}
-          <View
-            className="rounded-2xl p-4 gap-1.5"
-            style={{ backgroundColor: 'rgba(13, 95, 58, 0.05)', borderWidth: 1, borderColor: 'rgba(13, 95, 58, 0.12)' }}
-          >
-            <Text size="xs" weight="bold" style={{ color: PRIMARY_GREEN }}>
-              Phase 0.5 — Mock Login
-            </Text>
-            <Text size="xs" className="text-muted-foreground leading-relaxed">
-              <Text size="xs" weight="semibold">rider@patulod.com</Text> → Passenger flow{'\n'}
-              <Text size="xs" weight="semibold">apply@patulod.com</Text> → Driver application status{'\n'}
-              <Text size="xs" weight="semibold">driver@patulod.com</Text> → Approved driver dashboard{'\n'}
-              <Text size="xs" weight="semibold">fail@test.com</Text> → Error state{'\n'}
-              Password can be anything.
-            </Text>
           </View>
 
           <View style={{ height: 8 }} />

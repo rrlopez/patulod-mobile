@@ -5,6 +5,11 @@ web-build/
 *.log
 .DS_Store
 
+# Environment variables
+.env
+.env.local
+.env.*.local
+
 # Lockfiles are generated per project, not shipped with a template
 package-lock.json
 node_modules/

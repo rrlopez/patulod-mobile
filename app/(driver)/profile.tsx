@@ -21,6 +21,8 @@ import {
   Car,
   Star,
 } from 'lucide-react-native';
+import { api } from '../../lib/api';
+import { clearUser } from '../../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 
@@ -54,10 +56,20 @@ export default function DriverProfile() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  function handleLogout() {
-    // Phase 1: revoke session via auth.logout
-    router.replace('/');
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    try {
+      await api.logout();
+      clearUser(); // Clear auth store
+      router.replace('/'); // Go to landing page
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even if API fails, clear local session
+      clearUser();
+      router.replace('/');
+    }
   }
 
   return (

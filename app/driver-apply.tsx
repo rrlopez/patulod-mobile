@@ -8,6 +8,9 @@ import {
   User,
   Mail,
   Phone,
+  Lock,
+  Eye,
+  EyeOff,
   Bike,
   Hash,
   FileText,
@@ -16,6 +19,8 @@ import {
   ChevronRight,
   Info,
 } from 'lucide-react-native';
+import { api } from '../lib/api';
+import { setUser } from '../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 const ACCENT_YELLOW = '#fbbf24';
@@ -45,6 +50,12 @@ function validate(field: string, value: string): { state: FieldState; message?: 
       if (!value.trim()) return { state: 'error', message: 'Mobile number is required.' };
       if (!/^(\+639|09)\d{9}$/.test(value.replace(/\s/g, '')))
         return { state: 'error', message: 'Enter a valid PH number (e.g. 09171234567).' };
+      return { state: 'valid' };
+    case 'password':
+      if (!value) return { state: 'error', message: 'Password is required.' };
+      if (value.length < 8) return { state: 'error', message: 'Password must be at least 8 characters.' };
+      if (!/[A-Z]/.test(value)) return { state: 'error', message: 'Include at least one uppercase letter.' };
+      if (!/[0-9]/.test(value)) return { state: 'error', message: 'Include at least one number.' };
       return { state: 'valid' };
     case 'plateNumber':
       if (!value.trim()) return { state: 'error', message: 'Plate number is required.' };
@@ -78,26 +89,43 @@ export default function DriverApply() {
   const [fullName, setFullName]         = useState('');
   const [email, setEmail]               = useState('');
   const [phone, setPhone]               = useState('');
+  const [password, setPassword]         = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm]   = useState(false);
   const [vehicleType, setVehicleType]   = useState<string | null>(null);
   const [plateNumber, setPlateNumber]   = useState('');
   const [vehicleModel, setVehicleModel] = useState('');
   const [vehicleColor, setVehicleColor] = useState('');
   const [touched, setTouched]           = useState<Record<string, boolean>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError]   = useState<string | null>(null);
+  const [serverErrors, setServerErrors] = useState<Record<string, string>>({});
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [applicationId, setApplicationId] = useState<string | null>(null);
 
   const fieldStatus = {
-    fullName:     touched.fullName     ? validate('fullName', fullName)         : { state: 'idle' as FieldState },
-    email:        touched.email        ? validate('email', email)               : { state: 'idle' as FieldState },
-    phone:        touched.phone        ? validate('phone', phone)               : { state: 'idle' as FieldState },
-    plateNumber:  touched.plateNumber  ? validate('plateNumber', plateNumber)   : { state: 'idle' as FieldState },
-    vehicleModel: touched.vehicleModel ? validate('vehicleModel', vehicleModel) : { state: 'idle' as FieldState },
-    vehicleColor: touched.vehicleColor ? validate('vehicleColor', vehicleColor) : { state: 'idle' as FieldState },
+    fullName:     serverErrors.fullName ? { state: 'error' as FieldState, message: serverErrors.fullName } : (touched.fullName     ? validate('fullName', fullName)         : { state: 'idle' as FieldState }),
+    email:        serverErrors.email ? { state: 'error' as FieldState, message: serverErrors.email } : (touched.email        ? validate('email', email)               : { state: 'idle' as FieldState }),
+    phone:        serverErrors.phone ? { state: 'error' as FieldState, message: serverErrors.phone } : (touched.phone        ? validate('phone', phone)               : { state: 'idle' as FieldState }),
+    password:     serverErrors.password ? { state: 'error' as FieldState, message: serverErrors.password } : (touched.password     ? validate('password', password)         : { state: 'idle' as FieldState }),
+    confirmPassword: serverErrors.confirmPassword ? { state: 'error' as FieldState, message: serverErrors.confirmPassword } : (touched.confirmPassword
+      ? confirmPassword === password && confirmPassword.length > 0
+        ? { state: 'valid' as FieldState }
+        : { state: 'error' as FieldState, message: 'Passwords do not match.' }
+      : { state: 'idle' as FieldState }),
+    plateNumber:  serverErrors.plateNumber ? { state: 'error' as FieldState, message: serverErrors.plateNumber } : (touched.plateNumber  ? validate('plateNumber', plateNumber)   : { state: 'idle' as FieldState }),
+    vehicleModel: serverErrors.vehicleModel ? { state: 'error' as FieldState, message: serverErrors.vehicleModel } : (touched.vehicleModel ? validate('vehicleModel', vehicleModel) : { state: 'idle' as FieldState }),
+    vehicleColor: serverErrors.vehicleColor ? { state: 'error' as FieldState, message: serverErrors.vehicleColor } : (touched.vehicleColor ? validate('vehicleColor', vehicleColor) : { state: 'idle' as FieldState }),
   };
 
   const allValid =
     validate('fullName', fullName).state     === 'valid' &&
     validate('email', email).state           === 'valid' &&
     validate('phone', phone).state           === 'valid' &&
+    validate('password', password).state     === 'valid' &&
+    confirmPassword === password &&
+    confirmPassword.length > 0 &&
     validate('plateNumber', plateNumber).state === 'valid' &&
     validate('vehicleModel', vehicleModel).state === 'valid' &&
     validate('vehicleColor', vehicleColor).state === 'valid' &&
@@ -105,16 +133,139 @@ export default function DriverApply() {
 
   function handleBlur(field: string) {
     setTouched(prev => ({ ...prev, [field]: true }));
+    // Clear server error for this field when user edits
+    if (serverErrors[field]) {
+      setServerErrors(prev => {
+        const updated = { ...prev };
+        delete updated[field];
+        return updated;
+      });
+    }
   }
 
-  function handleSubmit() {
-    setTouched({ fullName: true, email: true, phone: true, plateNumber: true, vehicleModel: true, vehicleColor: true });
-    if (!allValid) return;
+  async function handleSubmit() {
+    setTouched({ fullName: true, email: true, phone: true, password: true, confirmPassword: true, plateNumber: true, vehicleModel: true, vehicleColor: true });
+    
+    console.log('=== Driver Application Submit ===');
+    console.log('All Valid:', allValid);
+    console.log('Vehicle Type:', vehicleType);
+    console.log('Field Validations:', {
+      fullName: validate('fullName', fullName).state,
+      email: validate('email', email).state,
+      phone: validate('phone', phone).state,
+      password: validate('password', password).state,
+      confirmPassword: confirmPassword === password && confirmPassword.length > 0 ? 'valid' : 'invalid',
+      plateNumber: validate('plateNumber', plateNumber).state,
+      vehicleModel: validate('vehicleModel', vehicleModel).state,
+      vehicleColor: validate('vehicleColor', vehicleColor).state,
+    });
+    
+    if (!allValid) {
+      console.log('❌ Validation failed, not submitting');
+      return;
+    }
+    
     setIsSubmitting(true);
-    setTimeout(() => {
+    setSubmitError(null);
+    setServerErrors({});
+
+    console.log('📤 Submitting driver application...');
+
+    try {
+      const response = await api.applyAsDriver({
+        fullName: fullName.trim(),
+        email: email.trim().toLowerCase(),
+        phone: phone.replace(/\s/g, ''),
+        password: password,
+        confirmPassword: confirmPassword,
+        vehicleType: vehicleType!,
+        plateNumber: plateNumber.toUpperCase().trim(),
+        vehicleModel: vehicleModel.trim(),
+        vehicleColor: vehicleColor.trim(),
+      });
+
+      console.log('📥 Response:', response);
+
+      if (response.success && response.applicationId) {
+        setApplicationId(response.applicationId);
+        
+        // Save user to store if session is returned
+        if (response.user) {
+          setUser(response.user);
+        }
+        
+        console.log('✅ Application successful! Redirecting to document upload...');
+        
+        // Redirect to document upload screen
+        router.push('/driver-docs');
+      } else if (response.errors) {
+        // Show field-specific errors
+        console.log('❌ Validation errors:', response.errors);
+        setServerErrors(response.errors);
+      } else {
+        console.log('❌ Application failed:', response.error);
+        setSubmitError(response.error || 'Failed to submit application. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Driver application error:', error);
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Network error. Please check your connection and try again.'
+      );
+    } finally {
       setIsSubmitting(false);
-      router.push('/driver-docs');
-    }, 1000);
+    }
+  }
+
+  // ── Success state ──────────────────────────────────────────────
+  if (submitSuccess) {
+    return (
+      <View
+        className="flex-1 items-center justify-center px-8 gap-6"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: '#fefdfb' }}
+      >
+        <View
+          className="h-20 w-20 rounded-full items-center justify-center"
+          style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)' }}
+        >
+          <CheckCircle2 size={40} color={SUCCESS_GREEN} strokeWidth={2} />
+        </View>
+        <View className="items-center gap-2">
+          <Text size="2xl" weight="bold" style={{ color: PRIMARY_GREEN }}>Application Submitted!</Text>
+          <Text size="sm" className="text-muted-foreground text-center leading-relaxed">
+            Your driver application has been received. Our team will review your submission and contact you at the email and phone number you provided.
+          </Text>
+          {applicationId && (
+            <View
+              className="rounded-xl px-4 py-2 mt-2"
+              style={{ backgroundColor: 'rgba(13, 95, 58, 0.08)' }}
+            >
+              <Text size="xs" className="text-muted-foreground">Application ID</Text>
+              <Text size="sm" weight="bold" style={{ color: PRIMARY_GREEN }}>{applicationId}</Text>
+            </View>
+          )}
+        </View>
+        <View className="w-full gap-3">
+          <Button
+            size="lg"
+            className="w-full"
+            style={{ backgroundColor: PRIMARY_GREEN }}
+            onPress={() => router.push('/driver-status')}
+          >
+            <Text size="base" weight="bold" className="text-white">Check Application Status</Text>
+          </Button>
+          <Button
+            size="lg"
+            variant="ghost"
+            className="w-full"
+            onPress={() => router.replace('/')}
+          >
+            <Text size="base" weight="semibold" style={{ color: PRIMARY_GREEN }}>Return to Home</Text>
+          </Button>
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -145,6 +296,24 @@ export default function DriverApply() {
               Fill in your personal and vehicle details below. After submitting, you'll be guided to upload the required documents. Applications are reviewed by the PATULOD team before approval.
             </Text>
           </View>
+
+          {/* ===== GENERAL ERROR MESSAGE ===== */}
+          {submitError && (
+            <View
+              className="rounded-xl p-4 flex-row items-start gap-3"
+              style={{ backgroundColor: '#fee2e2', borderWidth: 1, borderColor: '#fca5a5' }}
+            >
+              <AlertCircle size={20} color={ERROR_RED} strokeWidth={2} style={{ marginTop: 1 }} />
+              <View className="flex-1">
+                <Text size="sm" weight="semibold" style={{ color: ERROR_RED }}>
+                  Application Failed
+                </Text>
+                <Text size="xs" style={{ color: ERROR_RED, marginTop: 4 }}>
+                  {submitError}
+                </Text>
+              </View>
+            </View>
+          )}
 
           {/* ===== PERSONAL INFO ===== */}
           <View className="gap-3">
@@ -202,6 +371,59 @@ export default function DriverApply() {
                 onChangeText={setPhone}
                 onBlur={() => handleBlur('phone')}
                 keyboardType="phone-pad"
+                style={{ fontSize: 15, color: '#1a1a1a' }}
+              />
+            </FormField>
+
+            <FormField
+              label="Password"
+              icon={<Lock size={17} color="#9ca3af" strokeWidth={2} />}
+              status={fieldStatus.password}
+              hint="Min. 8 characters, 1 uppercase, 1 number"
+              rightElement={
+                <TouchableOpacity onPress={() => setShowPassword(v => !v)} hitSlop={8}>
+                  {showPassword
+                    ? <EyeOff size={17} color="#9ca3af" strokeWidth={2} />
+                    : <Eye size={17} color="#9ca3af" strokeWidth={2} />
+                  }
+                </TouchableOpacity>
+              }
+            >
+              <TextInput
+                className="flex-1"
+                placeholder="Create a strong password"
+                placeholderTextColor="#9ca3af"
+                value={password}
+                onChangeText={setPassword}
+                onBlur={() => handleBlur('password')}
+                secureTextEntry={!showPassword}
+                autoComplete="new-password"
+                style={{ fontSize: 15, color: '#1a1a1a' }}
+              />
+            </FormField>
+
+            <FormField
+              label="Confirm Password"
+              icon={<Lock size={17} color="#9ca3af" strokeWidth={2} />}
+              status={fieldStatus.confirmPassword}
+              rightElement={
+                <TouchableOpacity onPress={() => setShowConfirm(v => !v)} hitSlop={8}>
+                  {showConfirm
+                    ? <EyeOff size={17} color="#9ca3af" strokeWidth={2} />
+                    : <Eye size={17} color="#9ca3af" strokeWidth={2} />
+                  }
+                </TouchableOpacity>
+              }
+            >
+              <TextInput
+                className="flex-1"
+                placeholder="Re-enter your password"
+                placeholderTextColor="#9ca3af"
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                onBlur={() => handleBlur('confirmPassword')}
+                secureTextEntry={!showConfirm}
+                autoComplete="new-password"
                 style={{ fontSize: 15, color: '#1a1a1a' }}
               />
             </FormField>
@@ -357,12 +579,13 @@ export default function DriverApply() {
 /* ─── Local helper components ────────────────────────────────────────────── */
 
 function FormField({
-  label, icon, status, hint, children,
+  label, icon, status, hint, rightElement, children,
 }: {
   label: string;
   icon: React.ReactNode;
   status: { state: FieldState; message?: string };
   hint?: string;
+  rightElement?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const borderColor =
@@ -378,9 +601,10 @@ function FormField({
       >
         {icon}
         {children}
-        {status.state === 'valid' && (
+        {status.state === 'valid' && !rightElement && (
           <CheckCircle2 size={17} color={SUCCESS_GREEN} strokeWidth={2} />
         )}
+        {rightElement}
       </View>
       {hint && status.state === 'idle' && (
         <Text size="xs" className="text-muted-foreground px-1">{hint}</Text>
