@@ -33,14 +33,18 @@ async function apiRequest<T>(
   const baseUrl = getBaseUrl();
   const token = await getToken();
 
-  const headers: HeadersInit = {
+  const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...options.headers,
   };
 
   // Add auth token if available
   if (token) {
     headers.Authorization = `Bearer ${token}`;
+  }
+
+  // Add any custom headers from options
+  if (options.headers) {
+    Object.assign(headers, options.headers);
   }
 
   // Create abort controller for timeout
@@ -139,6 +143,35 @@ export interface DriverApplicationResponse {
   errors?: Record<string, string>;
 }
 
+export interface DriverDocumentData {
+  applicationId: string;
+  documentType: string;
+  fileUri: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export interface DriverDocumentResponse {
+  success: boolean;
+  documentId?: string;
+  uploadedUrl?: string;
+  error?: string;
+}
+
+export interface DriverApplicationStatus {
+  success: boolean;
+  application?: {
+    id: string;
+    status: string;
+    documents: Array<{
+      documentType: string;
+      reviewStatus: string;
+      uploadedAt: string;
+    }>;
+  };
+  error?: string;
+}
+
 export const api = {
   // Register a new passenger
   register: async (data: RegisterData): Promise<AuthResponse> => {
@@ -217,5 +250,70 @@ export const api = {
     }
 
     return response;
+  },
+
+  // Upload driver document
+  uploadDriverDocument: async (data: DriverDocumentData): Promise<DriverDocumentResponse> => {
+    const baseUrl = getBaseUrl();
+    const token = await getToken();
+
+    if (!token) {
+      throw new Error('Authentication required. Please log in.');
+    }
+
+    // Create FormData with file and metadata
+    const formData = new FormData();
+    
+    // Append file with proper structure
+    formData.append('file', {
+      uri: data.fileUri,
+      name: data.fileName,
+      type: data.mimeType,
+    } as any);
+    
+    formData.append('applicationId', data.applicationId);
+    formData.append('documentType', data.documentType);
+
+    // Create abort controller for 60s timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+    try {
+      const response = await fetch(`${baseUrl}/api/mobile/drivers/upload-document`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          // DO NOT set Content-Type - let fetch set multipart boundary
+        },
+        body: formData,
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      const result = await response.json();
+
+      if (!response.ok && response.status >= 500) {
+        throw new Error(result.error || 'Server error. Please try again.');
+      }
+
+      return result;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new Error('Upload timed out. Please check your connection and try again.');
+      }
+      throw error;
+    }
+  },
+
+  // Get driver application status
+  getDriverApplication: async (): Promise<DriverApplicationStatus> => {
+    return await apiRequest<DriverApplicationStatus>(
+      '/api/mobile/drivers/application',
+      {
+        method: 'GET',
+      }
+    );
   },
 };
