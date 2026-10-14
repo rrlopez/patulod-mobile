@@ -1,5 +1,6 @@
 // API client for PATULOD mobile app
 import * as SecureStore from 'expo-secure-store';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const getBaseUrl = () => {
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
@@ -261,49 +262,53 @@ export const api = {
       throw new Error('Authentication required. Please log in.');
     }
 
-    // Create FormData with file and metadata
-    const formData = new FormData();
-    
-    // Append file with proper structure
-    formData.append('file', {
-      uri: data.fileUri,
-      name: data.fileName,
-      type: data.mimeType,
-    } as any);
-    
-    formData.append('applicationId', data.applicationId);
-    formData.append('documentType', data.documentType);
-
-    // Create abort controller for 60s timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    console.log('📤 Uploading document:', {
+      applicationId: data.applicationId,
+      documentType: data.documentType,
+      fileName: data.fileName,
+      mimeType: data.mimeType,
+      uri: data.fileUri.substring(0, 50) + '...',
+    });
 
     try {
-      const response = await fetch(`${baseUrl}/api/mobile/drivers/upload-document`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          // DO NOT set Content-Type - let fetch set multipart boundary
-        },
-        body: formData,
-        signal: controller.signal,
-      });
+      // Use expo-file-system's uploadAsync which properly handles multipart uploads
+      // uploadType: 1 = MULTIPART
+      const uploadResult = await FileSystem.uploadAsync(
+        `${baseUrl}/api/mobile/drivers/upload-document`,
+        data.fileUri,
+        {
+          httpMethod: 'POST',
+          uploadType: 1, // MULTIPART upload type
+          fieldName: 'file',
+          parameters: {
+            applicationId: data.applicationId,
+            documentType: data.documentType,
+          },
+          headers: {
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
 
-      clearTimeout(timeoutId);
+      console.log('📥 Upload response status:', uploadResult.status);
 
-      const result = await response.json();
-
-      if (!response.ok && response.status >= 500) {
-        throw new Error(result.error || 'Server error. Please try again.');
+      if (uploadResult.status === 200 || uploadResult.status === 201) {
+        const result = JSON.parse(uploadResult.body) as DriverDocumentResponse;
+        console.log('📥 Upload response:', result);
+        return result;
+      } else {
+        const errorResult = JSON.parse(uploadResult.body) as DriverDocumentResponse;
+        console.log('❌ Upload failed:', errorResult);
+        throw new Error(errorResult.error || 'Upload failed. Please try again.');
       }
-
-      return result;
     } catch (error) {
-      clearTimeout(timeoutId);
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error('Upload timed out. Please check your connection and try again.');
+      console.error('❌ Upload error:', error);
+      
+      if (error instanceof Error) {
+        throw error;
       }
-      throw error;
+      
+      throw new Error('Upload failed. Please check your connection and try again.');
     }
   },
 

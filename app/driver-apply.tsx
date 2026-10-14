@@ -196,8 +196,8 @@ export default function DriverApply() {
         
         console.log('✅ Application successful! Redirecting to document upload...');
         
-        // Redirect to document upload screen
-        router.push('/driver-docs');
+        // Redirect to document upload screen with applicationId
+        router.push(`/driver-docs?applicationId=${response.applicationId}`);
       } else if (response.errors) {
         // Show field-specific errors
         console.log('❌ Validation errors:', response.errors);
