@@ -366,4 +366,25 @@ export const api = {
       }
     );
   },
+
+  // Generic Prisma query (uses admin's /api/prisma endpoint with Bearer token)
+  prismaQuery: async <T = unknown>(options: {
+    model: string;
+    operation: string;
+    args?: Record<string, unknown>;
+  }): Promise<T> => {
+    const response = await apiRequest<{ success: boolean; data?: T; error?: string }>(
+      '/api/prisma',
+      {
+        method: 'POST',
+        body: JSON.stringify(options),
+      }
+    );
+
+    if (!response.success) {
+      throw new Error(response.error ?? 'Database query failed');
+    }
+
+    return response.data as T;
+  },
 };
