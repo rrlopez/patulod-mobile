@@ -16,11 +16,12 @@ import {
 } from 'lucide-react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { api } from '../lib/api';
+import { authStore } from '../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 const ERROR_RED = '#dc2626';
 
-type AppStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'DOCUMENTS_NEEDED';
+type AppStatus = 'PENDING' | 'IN_PROGRESS' | 'APPROVED' | 'REJECTED' | 'DOCUMENTS_NEEDED';
 
 const STATUS_SCENARIOS: Record<AppStatus, {
   icon: React.ReactNode;
@@ -34,11 +35,20 @@ const STATUS_SCENARIOS: Record<AppStatus, {
   PENDING: {
     icon: <Clock size={44} color="#0369a1" strokeWidth={1.75} />,
     iconBg: 'rgba(3,105,161,0.1)',
-    title: 'Application Under Review',
-    subtitle: 'Your application has been submitted and is being reviewed by the PATULOD team. This usually takes 1–3 business days.',
+    title: 'Application Submitted',
+    subtitle: 'Your application has been submitted and is waiting to be reviewed by the PATULOD team.',
     color: '#0369a1',
-    badgeLabel: 'Pending Review',
+    badgeLabel: 'Submitted',
     badgeBg: 'rgba(3,105,161,0.1)',
+  },
+  IN_PROGRESS: {
+    icon: <Clock size={44} color="#2563eb" strokeWidth={1.75} />,
+    iconBg: 'rgba(37,99,235,0.1)',
+    title: 'Application Under Review',
+    subtitle: 'Your application is currently being reviewed by the PATULOD team. This usually takes 1–3 business days.',
+    color: '#2563eb',
+    badgeLabel: 'Under Review',
+    badgeBg: 'rgba(37,99,235,0.1)',
   },
   APPROVED: {
     icon: <CheckCircle2 size={44} color={PRIMARY_GREEN} strokeWidth={1.75} />,
@@ -101,6 +111,19 @@ export default function DriverStatus() {
 
       if (response.success && response.application) {
         setApplicationData(response.application);
+        
+        // Update the auth store with the latest application status
+        const currentState = authStore.state;
+        if (currentState.user && currentState.user.role === 'DRIVER') {
+          authStore.setState(() => ({
+            ...currentState,
+            user: {
+              ...currentState.user!,
+              driverApplicationStatus: response.application.status,
+            },
+          }));
+          console.log('✅ Updated driver application status in store:', response.application.status);
+        }
       } else {
         setError(response.error || 'Failed to load application status');
       }

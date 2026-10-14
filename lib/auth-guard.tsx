@@ -15,7 +15,7 @@ const PRIMARY_GREEN = '#0d5f3a';
 export function useAuthGuard() {
   const router = useRouter();
   const segments = useSegments();
-  const { isAuthenticated, role, isInitialized } = useStore(authStore);
+  const { isAuthenticated, role, user, isInitialized } = useStore(authStore);
   const [isChecking, setIsChecking] = useState(true);
 
   // Initialize auth on mount
@@ -41,14 +41,32 @@ export function useAuthGuard() {
           // Not authenticated but trying to access protected route (dashboard)
           console.log('🚫 Not authenticated, redirecting to home');
           router.replace('/');
-        } else if (token && isAuthenticated && inAuthFlow && !inDriverOnboarding) {
-          // Authenticated but trying to access auth flow (login, register)
-          // Allow driver onboarding routes even if authenticated
-          console.log('✅ Already authenticated, redirecting to dashboard');
-          if (role === 'DRIVER') {
-            router.replace('/(driver)/home');
-          } else if (role === 'PASSENGER') {
-            router.replace('/(passenger)/home');
+        } else if (!token && inDriverOnboarding) {
+          // Not authenticated but on driver onboarding flow - allow it
+          // User might be coming from driver apply public flow
+          return;
+        } else if (token && isAuthenticated) {
+          const driverStatus = user?.driverApplicationStatus;
+          
+          // For drivers with unapproved applications
+          if (role === 'DRIVER' && driverStatus !== 'APPROVED') {
+            // If trying to access driver dashboard, redirect to status
+            if (inAuthGroup && currentRoute === '(driver)') {
+              console.log('📋 Driver application not approved, redirecting to status screen');
+              router.replace('/driver-status');
+            }
+            // Allow them to stay on driver onboarding routes or public routes
+            return;
+          }
+          
+          // For approved drivers or passengers trying to access auth flow
+          if (inAuthFlow && !inDriverOnboarding) {
+            console.log('✅ Already authenticated, redirecting to dashboard');
+            if (role === 'DRIVER') {
+              router.replace('/(driver)/home');
+            } else if (role === 'PASSENGER') {
+              router.replace('/(passenger)/home');
+            }
           }
         }
       } catch (error) {
@@ -59,7 +77,7 @@ export function useAuthGuard() {
     }
 
     checkAuth();
-  }, [isAuthenticated, role, segments, isInitialized]);
+  }, [isAuthenticated, role, user, segments, isInitialized]);
 
   return { isChecking: isChecking || !isInitialized };
 }

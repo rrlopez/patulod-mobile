@@ -8,6 +8,7 @@ interface AuthState {
     email: string;
     phone: string;
     role: string;
+    driverApplicationStatus?: string;
   } | null;
   isAuthenticated: boolean;
   role: string | null;
