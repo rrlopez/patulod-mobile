@@ -9,6 +9,7 @@ import * as SystemUI from 'expo-system-ui';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useCSSVariable } from 'uniwind';
 import { PanelUIProvider, useThemeMode } from 'panelui-native';
+import { AuthGuardProvider } from '../lib/auth-guard';
 
 /**
  * React Navigation paints its own theme background over every screen and
@@ -58,7 +59,9 @@ function ThemedNavigation() {
 
   return (
     <ThemeProvider value={navigationTheme}>
-      <Stack screenOptions={{ headerShown: false }} />
+      <AuthGuardProvider>
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthGuardProvider>
       {/* Not style="auto": that reads the OS appearance, which is left
           unspecified for the named themes. */}
       <StatusBar style={mode === 'dark' ? 'light' : 'dark'} />

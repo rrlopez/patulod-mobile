@@ -69,12 +69,27 @@ export default function Login() {
           // Route based on actual user role from server
           router.dismissAll();
           if (response.user.role === 'DRIVER') {
-            // Check driver application status
-            if (response.user.driverApplicationStatus === 'APPROVED') {
-              // Approved drivers go to driver home
+            // Check if documents are incomplete
+            if (response.user.hasIncompleteDocuments) {
+              // Driver hasn't completed document upload - redirect to upload screen
+              // Need to get applicationId first
+              api.getDriverApplication()
+                .then(appResponse => {
+                  if (appResponse.success && appResponse.application) {
+                    router.replace(`/driver-docs?applicationId=${appResponse.application.id}`);
+                  } else {
+                    // Fallback to status screen if can't get application
+                    router.replace('/driver-status');
+                  }
+                })
+                .catch(() => {
+                  router.replace('/driver-status');
+                });
+            } else if (response.user.driverApplicationStatus === 'APPROVED') {
+              // Approved drivers with complete documents go to driver home
               router.replace('/(driver)/home');
             } else {
-              // PENDING, REJECTED, or DOCUMENTS_NEEDED drivers go to application status
+              // PENDING or REJECTED drivers go to application status
               router.replace('/driver-status');
             }
           } else {

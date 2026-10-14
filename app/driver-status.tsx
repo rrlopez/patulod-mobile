@@ -1,29 +1,26 @@
-import { ScrollView, View, TouchableOpacity } from 'react-native';
+import { ScrollView, View, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Text } from 'panelui-native';
 import {
   Clock,
   CheckCircle2,
   XCircle,
   AlertTriangle,
-  ChevronRight,
   FileText,
   RefreshCw,
-  Home,
   Bell,
   User,
+  AlertCircle,
 } from 'lucide-react-native';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { api } from '../lib/api';
 
 const PRIMARY_GREEN = '#0d5f3a';
+const ERROR_RED = '#dc2626';
 
-/**
- * Mock status — toggle between these to preview all states:
- * 'PENDING' | 'APPROVED' | 'REJECTED' | 'CORRECTION_NEEDED'
- */
-type AppStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CORRECTION_NEEDED';
+type AppStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'DOCUMENTS_NEEDED';
 
 const STATUS_SCENARIOS: Record<AppStatus, {
   icon: React.ReactNode;
@@ -61,7 +58,7 @@ const STATUS_SCENARIOS: Record<AppStatus, {
     badgeLabel: 'Not Approved',
     badgeBg: 'rgba(220,38,38,0.1)',
   },
-  CORRECTION_NEEDED: {
+  DOCUMENTS_NEEDED: {
     icon: <AlertTriangle size={44} color="#92400e" strokeWidth={1.75} />,
     iconBg: 'rgba(251,191,36,0.15)',
     title: 'Action Required',
@@ -72,54 +69,120 @@ const STATUS_SCENARIOS: Record<AppStatus, {
   },
 };
 
-const MOCK_DOCUMENTS = [
-  { id: 'license',      label: "Driver's License",       docStatus: 'approved'  as const },
-  { id: 'or_cr',        label: 'OR / CR',                docStatus: 'rejected'  as const },
-  { id: 'valid_id',     label: 'Government-Issued ID',   docStatus: 'approved'  as const },
-  { id: 'selfie',       label: 'Selfie with ID',         docStatus: 'reviewing' as const },
-  { id: 'vehicle_photo',label: 'Vehicle Photo',          docStatus: 'approved'  as const },
-];
-
 const DOC_STATUS_CFG = {
-  pending:   { label: 'Not uploaded', color: '#9ca3af' },
-  uploaded:  { label: 'Uploaded',     color: '#0369a1' },
-  reviewing: { label: 'Reviewing',    color: '#92400e' },
-  approved:  { label: 'Approved ✓',   color: PRIMARY_GREEN },
-  rejected:  { label: 'Rejected',     color: '#dc2626' },
+  PENDING:  { label: 'Reviewing', color: '#0369a1' },
+  APPROVED: { label: 'Approved ✓', color: PRIMARY_GREEN },
+  REJECTED: { label: 'Rejected', color: ERROR_RED },
 };
 
-/**
- * Application Status Screen
- * Phase 0.5 — Mock UI
- *
- * Per master-plan.md Phase 5:
- * - Status badge: PENDING / APPROVED / REJECTED / CORRECTION_NEEDED
- * - Reason for rejection or correction
- * - Correction route back to document upload
- */
+const DOC_TYPE_LABELS: Record<string, string> = {
+  DRIVERS_LICENSE_FRONT: "Driver's License (Front)",
+  DRIVERS_LICENSE_BACK: "Driver's License (Back)",
+  VEHICLE_OR_CR: 'Vehicle OR/CR',
+  GOVERNMENT_ID: 'Government ID',
+  VEHICLE_PHOTO_FRONT: 'Vehicle Photo (Front)',
+  VEHICLE_PHOTO_SIDE: 'Vehicle Photo (Side)',
+  VEHICLE_PHOTO_PLATE: 'Vehicle Photo (Plate)',
+};
+
 export default function DriverStatus() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  // Toggle to preview different states
-  const [currentStatus, setCurrentStatus] = useState<AppStatus>('PENDING');
-  const scenario = STATUS_SCENARIOS[currentStatus];
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [applicationData, setApplicationData] = useState<any>(null);
 
-  const STATUS_CYCLE: AppStatus[] = ['PENDING', 'APPROVED', 'REJECTED', 'CORRECTION_NEEDED'];
+  async function fetchApplicationStatus() {
+    try {
+      setError(null);
+      const response = await api.getDriverApplication();
 
-  function cycleStatus() {
-    const idx = STATUS_CYCLE.indexOf(currentStatus);
-    setCurrentStatus(STATUS_CYCLE[(idx + 1) % STATUS_CYCLE.length]);
+      if (response.success && response.application) {
+        setApplicationData(response.application);
+      } else {
+        setError(response.error || 'Failed to load application status');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load application status');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await fetchApplicationStatus();
+  }
+
+  useEffect(() => {
+    fetchApplicationStatus();
+  }, []);
+
+  // Loading state
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background" style={{ paddingTop: insets.top }}>
+        <ActivityIndicator size="large" color={PRIMARY_GREEN} />
+        <Text size="sm" className="text-muted-foreground mt-4">Loading application status...</Text>
+      </View>
+    );
+  }
+
+  // Error state
+  if (error || !applicationData) {
+    return (
+      <View
+        className="flex-1 items-center justify-center px-8 gap-6 bg-background"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
+      >
+        <View
+          className="h-20 w-20 rounded-full items-center justify-center"
+          style={{ backgroundColor: 'rgba(220, 38, 38, 0.12)' }}
+        >
+          <AlertCircle size={40} color={ERROR_RED} strokeWidth={2} />
+        </View>
+        <View className="items-center gap-2">
+          <Text size="2xl" weight="bold" style={{ color: ERROR_RED }}>Error Loading Status</Text>
+          <Text size="sm" className="text-muted-foreground text-center leading-relaxed">
+            {error || 'Failed to load your application status. Please try again.'}
+          </Text>
+        </View>
+        <Button
+          size="lg"
+          className="w-full"
+          style={{ backgroundColor: PRIMARY_GREEN }}
+          onPress={fetchApplicationStatus}
+        >
+          <RefreshCw size={18} color="#fff" strokeWidth={2} />
+          <Text size="base" weight="bold" className="text-white ml-2">Try Again</Text>
+        </Button>
+      </View>
+    );
+  }
+
+  const currentStatus = applicationData.status as AppStatus;
+  const scenario = STATUS_SCENARIOS[currentStatus] || STATUS_SCENARIOS.PENDING;
+  const hasRejectedDocs = applicationData.documents.some((doc: any) => doc.reviewStatus === 'REJECTED');
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-
       {/* ===== HEADER ===== */}
       <View className="flex-row items-center justify-between px-4 py-3">
         <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>Application Status</Text>
         
         <View className="flex-row items-center gap-2">
+          {/* Refresh button */}
+          <TouchableOpacity
+            className="h-10 w-10 items-center justify-center rounded-full"
+            style={{ backgroundColor: 'rgba(13,95,58,0.08)' }}
+            onPress={handleRefresh}
+          >
+            <RefreshCw size={18} color={PRIMARY_GREEN} strokeWidth={2.5} />
+          </TouchableOpacity>
+
           {/* Notification button */}
           <TouchableOpacity
             className="h-10 w-10 items-center justify-center rounded-full"
@@ -137,25 +200,17 @@ export default function DriverStatus() {
           >
             <User size={18} color={PRIMARY_GREEN} strokeWidth={2.5} />
           </TouchableOpacity>
-
-          {/* Demo toggle */}
-          <TouchableOpacity
-            className="flex-row items-center gap-1.5 rounded-full px-3 py-1.5"
-            style={{ backgroundColor: 'rgba(13,95,58,0.08)' }}
-            onPress={cycleStatus}
-          >
-            <RefreshCw size={13} color={PRIMARY_GREEN} strokeWidth={2.5} />
-            <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>Demo</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[PRIMARY_GREEN]} />
+        }
       >
         <View className="px-5 gap-5">
-
           {/* ===== STATUS CARD ===== */}
           <Animated.View entering={FadeIn.duration(500)}>
             <View
@@ -189,8 +244,8 @@ export default function DriverStatus() {
             </View>
           </Animated.View>
 
-          {/* ===== REJECTION REASON (REJECTED) ===== */}
-          {currentStatus === 'REJECTED' && (
+          {/* ===== REJECTION REASON ===== */}
+          {currentStatus === 'REJECTED' && applicationData.rejectionReason && (
             <Animated.View entering={FadeInDown.delay(100).duration(400)}>
               <View className="gap-2">
                 <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
@@ -200,102 +255,101 @@ export default function DriverStatus() {
                   className="rounded-2xl p-4 gap-2"
                   style={{ backgroundColor: 'rgba(220,38,38,0.06)', borderWidth: 1.5, borderColor: 'rgba(220,38,38,0.2)' }}
                 >
-                  <Text size="sm" weight="bold" style={{ color: '#dc2626' }}>Application Not Approved</Text>
+                  <Text size="sm" weight="bold" style={{ color: ERROR_RED }}>Application Not Approved</Text>
                   <Text size="sm" className="text-foreground leading-relaxed">
-                    Your OR/CR document could not be verified. The document appears to be expired or the details do not match the vehicle information provided.
-                  </Text>
-                  <Text size="xs" className="text-muted-foreground leading-relaxed">
-                    If you believe this is an error, please contact our support team with your booking reference.
+                    {applicationData.rejectionReason}
                   </Text>
                 </View>
               </View>
             </Animated.View>
           )}
 
-          {/* ===== CORRECTION DETAILS (CORRECTION_NEEDED) ===== */}
-          {currentStatus === 'CORRECTION_NEEDED' && (
+          {/* ===== REJECTED DOCUMENTS ===== */}
+          {hasRejectedDocs && (
             <Animated.View entering={FadeInDown.delay(100).duration(400)}>
               <View className="gap-2">
                 <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
                   Documents Requiring Correction
                 </Text>
-                <View
-                  className="rounded-2xl p-4 gap-3"
-                  style={{ backgroundColor: 'rgba(251,191,36,0.07)', borderWidth: 1.5, borderColor: 'rgba(251,191,36,0.3)' }}
+                {applicationData.documents
+                  .filter((doc: any) => doc.reviewStatus === 'REJECTED')
+                  .map((doc: any) => (
+                    <View
+                      key={doc.id}
+                      className="rounded-2xl p-4 gap-3"
+                      style={{ backgroundColor: 'rgba(251,191,36,0.07)', borderWidth: 1.5, borderColor: 'rgba(251,191,36,0.3)' }}
+                    >
+                      <Text size="sm" weight="bold" style={{ color: '#92400e' }}>
+                        {DOC_TYPE_LABELS[doc.documentType]} — Re-upload Required
+                      </Text>
+                      {doc.rejectionReason && (
+                        <Text size="sm" className="text-foreground leading-relaxed">
+                          {doc.rejectionReason}
+                        </Text>
+                      )}
+                    </View>
+                  ))}
+                <Button
+                  size="md"
+                  className="w-full mt-2"
+                  style={{ backgroundColor: '#92400e' }}
+                  onPress={() => router.push(`/driver-docs?applicationId=${applicationData.id}`)}
                 >
-                  <Text size="sm" weight="bold" style={{ color: '#92400e' }}>OR / CR — Re-upload Required</Text>
-                  <Text size="sm" className="text-foreground leading-relaxed">
-                    The uploaded OR/CR image is blurry and the text is not legible. Please re-upload a clear, well-lit photo where all details are visible.
-                  </Text>
-                  <Button
-                    size="md"
-                    className="w-full"
-                    style={{ backgroundColor: '#92400e' }}
-                    onPress={() => router.push('/driver-docs')}
-                  >
-                    <Text size="sm" weight="bold" className="text-white">Re-upload Documents</Text>
-                  </Button>
-                </View>
+                  <Text size="sm" weight="bold" className="text-white">Re-upload Documents</Text>
+                </Button>
               </View>
             </Animated.View>
           )}
 
           {/* ===== DOCUMENT STATUS LIST ===== */}
-          <Animated.View entering={FadeInDown.delay(150).duration(400)}>
-            <View className="gap-2">
-              <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-                Submitted Documents
-              </Text>
-              <View
-                className="rounded-2xl overflow-hidden"
-                style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
-              >
-                {MOCK_DOCUMENTS.map((doc, i) => {
-                  const cfg = DOC_STATUS_CFG[doc.docStatus];
-                  return (
-                    <View key={doc.id}>
-                      <View className="flex-row items-center gap-3 px-4 py-3.5">
-                        <FileText size={16} color="#9ca3af" strokeWidth={2} />
-                        <Text size="sm" weight="medium" className="text-foreground flex-1">
-                          {doc.label}
-                        </Text>
-                        <Text size="xs" weight="semibold" style={{ color: cfg.color }}>
-                          {cfg.label}
-                        </Text>
+          {applicationData.documents.length > 0 && (
+            <Animated.View entering={FadeInDown.delay(150).duration(400)}>
+              <View className="gap-2">
+                <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
+                  Submitted Documents ({applicationData.documents.length}/7)
+                </Text>
+                <View
+                  className="rounded-2xl overflow-hidden"
+                  style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
+                >
+                  {applicationData.documents.map((doc: any, i: number) => {
+                    const cfg = DOC_STATUS_CFG[doc.reviewStatus as keyof typeof DOC_STATUS_CFG] || DOC_STATUS_CFG.PENDING;
+                    return (
+                      <View key={doc.id}>
+                        <View className="flex-row items-center gap-3 px-4 py-3.5">
+                          <FileText size={16} color="#9ca3af" strokeWidth={2} />
+                          <Text size="sm" weight="medium" className="text-foreground flex-1">
+                            {DOC_TYPE_LABELS[doc.documentType] || doc.documentType}
+                          </Text>
+                          <Text size="xs" weight="semibold" style={{ color: cfg.color }}>
+                            {cfg.label}
+                          </Text>
+                        </View>
+                        {i < applicationData.documents.length - 1 && (
+                          <View className="h-px bg-border/40 mx-4" />
+                        )}
                       </View>
-                      {i < MOCK_DOCUMENTS.length - 1 && (
-                        <View className="h-px bg-border/40 mx-4" />
-                      )}
-                    </View>
-                  );
-                })}
+                    );
+                  })}
+                </View>
               </View>
-            </View>
-          </Animated.View>
+            </Animated.View>
+          )}
 
-          {/* ===== TIMELINE ===== */}
+          {/* ===== VEHICLE INFO ===== */}
           <Animated.View entering={FadeInDown.delay(200).duration(400)}>
             <View className="gap-2">
               <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-                Timeline
+                Vehicle Information
               </Text>
               <View
-                className="rounded-2xl p-4 gap-3"
+                className="rounded-2xl p-4 gap-2"
                 style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
               >
-                <TimelineItem done label="Application submitted" time="Oct 8, 2026 · 8:30 AM" />
-                <TimelineItem done label="Documents uploaded" time="Oct 8, 2026 · 8:35 AM" />
-                <TimelineItem
-                  done={currentStatus !== 'PENDING'}
-                  active={currentStatus === 'PENDING'}
-                  label="Under review by PATULOD team"
-                  time={currentStatus === 'PENDING' ? 'In progress…' : 'Oct 9, 2026 · 10:00 AM'}
-                />
-                <TimelineItem
-                  done={currentStatus === 'APPROVED'}
-                  label="Account activated"
-                  time={currentStatus === 'APPROVED' ? 'Oct 9, 2026 · 10:05 AM' : 'Pending'}
-                />
+                <InfoRow label="Type" value={applicationData.vehicleType.toUpperCase()} />
+                <InfoRow label="Plate Number" value={applicationData.plateNumber} />
+                <InfoRow label="Model" value={applicationData.vehicleModel} />
+                <InfoRow label="Color" value={applicationData.vehicleColor} />
               </View>
             </View>
           </Animated.View>
@@ -312,7 +366,7 @@ export default function DriverStatus() {
                 <Text size="base" weight="bold" className="text-white">Go to Driver Dashboard</Text>
               </Button>
             )}
-            {(currentStatus === 'REJECTED' || currentStatus === 'CORRECTION_NEEDED') && (
+            {(currentStatus === 'REJECTED' || hasRejectedDocs) && (
               <Button
                 size="lg"
                 variant="outline"
@@ -325,17 +379,6 @@ export default function DriverStatus() {
             )}
           </Animated.View>
 
-          {/* ===== MOCK NOTE ===== */}
-          <View
-            className="rounded-2xl p-4 gap-1"
-            style={{ backgroundColor: 'rgba(13,95,58,0.05)', borderWidth: 1, borderColor: 'rgba(13,95,58,0.12)' }}
-          >
-            <Text size="xs" weight="bold" style={{ color: PRIMARY_GREEN }}>Phase 0.5 — Demo</Text>
-            <Text size="xs" className="text-muted-foreground">
-              Tap the "Demo" button top-right to cycle through all 4 status states.
-            </Text>
-          </View>
-
           <View style={{ height: 8 }} />
         </View>
       </ScrollView>
@@ -343,35 +386,13 @@ export default function DriverStatus() {
   );
 }
 
-/* ─── Local helper ───────────────────────────────────────────────────────── */
+/* ─── Helper Components ──────────────────────────────────────────────────── */
 
-function TimelineItem({
-  label, time, done, active,
-}: {
-  label: string;
-  time: string;
-  done?: boolean;
-  active?: boolean;
-}) {
+function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-row items-start gap-3">
-      <View className="items-center" style={{ width: 20 }}>
-        {done ? (
-          <CheckCircle2 size={18} color={PRIMARY_GREEN} strokeWidth={2.5} />
-        ) : active ? (
-          <View className="h-4.5 w-4.5 rounded-full border-2 items-center justify-center" style={{ borderColor: '#0369a1' }}>
-            <View className="h-2 w-2 rounded-full" style={{ backgroundColor: '#0369a1' }} />
-          </View>
-        ) : (
-          <View className="h-4 w-4 rounded-full border-2" style={{ borderColor: '#e5e5e3' }} />
-        )}
-      </View>
-      <View className="flex-1 gap-0.5">
-        <Text size="sm" weight={done || active ? 'semibold' : 'medium'} style={{ color: done ? '#1a1a1a' : active ? '#0369a1' : '#9ca3af' }}>
-          {label}
-        </Text>
-        <Text size="xs" style={{ color: done ? PRIMARY_GREEN : '#9ca3af' }}>{time}</Text>
-      </View>
+    <View className="flex-row items-center justify-between py-1">
+      <Text size="sm" className="text-muted-foreground">{label}</Text>
+      <Text size="sm" weight="semibold" className="text-foreground">{value}</Text>
     </View>
   );
 }

@@ -105,6 +105,7 @@ export interface AuthResponse {
     phone?: string;
     role: string;
     driverApplicationStatus?: string; // PENDING, APPROVED, REJECTED, DOCUMENTS_NEEDED
+    hasIncompleteDocuments?: boolean; // True if driver hasn't uploaded all 7 documents
   };
   session?: {
     token: string;
@@ -164,9 +165,22 @@ export interface DriverApplicationStatus {
   application?: {
     id: string;
     status: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    vehicleType: string;
+    plateNumber: string;
+    vehicleModel: string;
+    vehicleColor: string;
+    submittedAt: string;
+    reviewedAt?: string;
+    rejectionReason?: string;
+    notes?: string;
     documents: Array<{
+      id: string;
       documentType: string;
       reviewStatus: string;
+      rejectionReason?: string;
       uploadedAt: string;
     }>;
   };
@@ -231,6 +245,37 @@ export const api = {
   // Get current user
   getCurrentUser: async (): Promise<AuthResponse> => {
     return await apiRequest<AuthResponse>('/api/mobile/auth/me', {
+      method: 'GET',
+    });
+  },
+
+  // Get user profile (more detailed than getCurrentUser)
+  getUserProfile: async (): Promise<{
+    success: boolean;
+    user?: {
+      id: string;
+      fullName: string;
+      email: string;
+      phone: string;
+      role: string;
+      isActive: boolean;
+      createdAt: string;
+      driverStats?: {
+        rating: number;
+        totalTrips: number;
+        memberSince: string;
+      };
+      vehicleInfo?: {
+        vehicleType: string;
+        plateNumber: string;
+        vehicleModel: string;
+        vehicleColor: string;
+      };
+      applicationStatus?: string;
+    };
+    error?: string;
+  }> => {
+    return await apiRequest('/api/mobile/user/me', {
       method: 'GET',
     });
   },

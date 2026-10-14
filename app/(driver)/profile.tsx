@@ -1,7 +1,7 @@
-import { ScrollView, View, TouchableOpacity } from 'react-native';
+import { ScrollView, View, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Text } from 'panelui-native';
 import {
   User,
@@ -20,43 +20,58 @@ import {
   CheckCircle2,
   Car,
   Star,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react-native';
 import { api } from '../../lib/api';
 import { clearUser } from '../../lib/store';
 
 const PRIMARY_GREEN = '#0d5f3a';
-
-const MOCK_DRIVER = {
-  fullName: 'Pedro Bautista',
-  email: 'pedro@example.com',
-  phone: '+63 917 987 6543',
-  role: 'Driver',
-  memberSince: 'September 2026',
-  rating: 4.8,
-  totalTrips: 142,
-  vehicleModel: 'Motorcycle',
-  plateNumber: 'INC-1234',
-};
+const ERROR_RED = '#dc2626';
 
 /**
  * Driver Profile Screen
- * Phase 0.5 — Mock UI
- *
- * Per master-plan.md Phase 1:
- * - View/edit name, email, phone
- * - Driver-specific details (vehicle, rating, trips)
- * - Links to Terms, Privacy Notice, Safety Guidelines, Help/Support
- * - Logout
- * - Deactivation / deletion request
+ * Integrated with backend API
  */
 export default function DriverProfile() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [profileData, setProfileData] = useState<any>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeactivateConfirm, setShowDeactivateConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  async function fetchProfile() {
+    try {
+      setError(null);
+      const response = await api.getUserProfile();
+
+      if (response.success && response.user) {
+        setProfileData(response.user);
+      } else {
+        setError(response.error || 'Failed to load profile');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load profile');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await fetchProfile();
+  }
+
+  useEffect(() => {
+    fetchProfile();
+  }, []);
 
   async function handleLogout() {
     setIsLoggingOut(true);
@@ -72,17 +87,69 @@ export default function DriverProfile() {
     }
   }
 
+  // Loading state
+  if (loading) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background" style={{ paddingTop: insets.top }}>
+        <ActivityIndicator size="large" color={PRIMARY_GREEN} />
+        <Text size="sm" className="text-muted-foreground mt-4">Loading profile...</Text>
+      </View>
+    );
+  }
+
+  // Error state
+  if (error || !profileData) {
+    return (
+      <View
+        className="flex-1 items-center justify-center px-8 gap-6 bg-background"
+        style={{ paddingTop: insets.top, paddingBottom: insets.bottom }}
+      >
+        <View
+          className="h-20 w-20 rounded-full items-center justify-center"
+          style={{ backgroundColor: 'rgba(220, 38, 38, 0.12)' }}
+        >
+          <AlertCircle size={40} color={ERROR_RED} strokeWidth={2} />
+        </View>
+        <View className="items-center gap-2">
+          <Text size="2xl" weight="bold" style={{ color: ERROR_RED }}>Error Loading Profile</Text>
+          <Text size="sm" className="text-muted-foreground text-center leading-relaxed">
+            {error || 'Failed to load your profile. Please try again.'}
+          </Text>
+        </View>
+        <Button
+          size="lg"
+          className="w-full"
+          style={{ backgroundColor: PRIMARY_GREEN }}
+          onPress={fetchProfile}
+        >
+          <RefreshCw size={18} color="#fff" strokeWidth={2} />
+          <Text size="base" weight="bold" className="text-white ml-2">Try Again</Text>
+        </Button>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
 
       {/* ===== HEADER ===== */}
-      <View className="px-5 py-3">
+      <View className="flex-row items-center justify-between px-5 py-3">
         <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>My Profile</Text>
+        <TouchableOpacity
+          className="h-10 w-10 items-center justify-center rounded-full"
+          style={{ backgroundColor: 'rgba(13,95,58,0.08)' }}
+          onPress={handleRefresh}
+        >
+          <RefreshCw size={18} color={PRIMARY_GREEN} strokeWidth={2.5} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={[PRIMARY_GREEN]} />
+        }
       >
         <View className="px-5 gap-6">
 
@@ -103,84 +170,100 @@ export default function DriverProfile() {
               </View>
             </View>
             <View className="items-center gap-0.5">
-              <Text size="xl" weight="bold" className="text-foreground">{MOCK_DRIVER.fullName}</Text>
+              <Text size="xl" weight="bold" className="text-foreground">{profileData.fullName}</Text>
               <View
                 className="flex-row items-center gap-1.5 rounded-full px-3 py-1"
                 style={{ backgroundColor: 'rgba(13, 95, 58, 0.08)' }}
               >
                 <CheckCircle2 size={12} color={PRIMARY_GREEN} strokeWidth={2.5} />
                 <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
-                  {MOCK_DRIVER.role} · Member since {MOCK_DRIVER.memberSince}
+                  {profileData.role} · Member since {profileData.driverStats?.memberSince}
                 </Text>
               </View>
             </View>
           </View>
 
           {/* ===== DRIVER STATS ===== */}
-          <View className="gap-2">
-            <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-              Driver Stats
-            </Text>
-            <View
-              className="rounded-2xl p-4"
-              style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
-            >
-              <View className="flex-row items-center gap-4">
-                <View className="flex-1 items-center gap-1">
-                  <View className="flex-row items-center gap-1">
-                    <Star size={16} color="#fbbf24" strokeWidth={2} fill="#fbbf24" />
-                    <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>
-                      {MOCK_DRIVER.rating.toFixed(1)}
-                    </Text>
+          {profileData.driverStats && (
+            <View className="gap-2">
+              <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
+                Driver Stats
+              </Text>
+              <View
+                className="rounded-2xl p-4"
+                style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
+              >
+                <View className="flex-row items-center gap-4">
+                  <View className="flex-1 items-center gap-1">
+                    <View className="flex-row items-center gap-1">
+                      <Star size={16} color="#fbbf24" strokeWidth={2} fill="#fbbf24" />
+                      <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>
+                        {profileData.driverStats.rating.toFixed(1)}
+                      </Text>
+                    </View>
+                    <Text size="xs" className="text-muted-foreground">Rating</Text>
                   </View>
-                  <Text size="xs" className="text-muted-foreground">Rating</Text>
-                </View>
-                <View className="h-12 w-px bg-border" />
-                <View className="flex-1 items-center gap-1">
-                  <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>
-                    {MOCK_DRIVER.totalTrips}
-                  </Text>
-                  <Text size="xs" className="text-muted-foreground">Total Trips</Text>
+                  <View className="h-12 w-px bg-border" />
+                  <View className="flex-1 items-center gap-1">
+                    <Text size="xl" weight="bold" style={{ color: PRIMARY_GREEN }}>
+                      {profileData.driverStats.totalTrips}
+                    </Text>
+                    <Text size="xs" className="text-muted-foreground">Total Trips</Text>
+                  </View>
                 </View>
               </View>
             </View>
-          </View>
+          )}
 
           {/* ===== VEHICLE INFO ===== */}
-          <View className="gap-2">
-            <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-              Vehicle Information
-            </Text>
-            <View
-              className="rounded-2xl overflow-hidden"
-              style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
-            >
-              <View className="flex-row items-center gap-3 px-4 py-3.5">
-                <Car size={16} color="#9ca3af" strokeWidth={2} />
-                <View className="flex-1 gap-0.5">
-                  <Text size="xs" className="text-muted-foreground">Vehicle Type</Text>
-                  <Text size="sm" weight="medium" className="text-foreground">{MOCK_DRIVER.vehicleModel}</Text>
-                </View>
-              </View>
-              <View className="h-px bg-border/40 mx-4" />
-              <View className="flex-row items-center gap-3 px-4 py-3.5">
-                <FileText size={16} color="#9ca3af" strokeWidth={2} />
-                <View className="flex-1 gap-0.5">
-                  <Text size="xs" className="text-muted-foreground">Plate Number</Text>
-                  <Text size="sm" weight="medium" className="text-foreground">{MOCK_DRIVER.plateNumber}</Text>
-                </View>
-              </View>
-            </View>
-            <TouchableOpacity
-              className="flex-row items-center justify-center gap-1.5 py-2"
-              onPress={() => router.push('/driver-docs')}
-            >
-              <Edit3 size={13} color={PRIMARY_GREEN} strokeWidth={2.5} />
-              <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
-                Update Vehicle Documents
+          {profileData.vehicleInfo && (
+            <View className="gap-2">
+              <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
+                Vehicle Information
               </Text>
-            </TouchableOpacity>
-          </View>
+              <View
+                className="rounded-2xl overflow-hidden"
+                style={{ borderWidth: 1.5, borderColor: '#e5e5e3', backgroundColor: '#fff' }}
+              >
+                <View className="flex-row items-center gap-3 px-4 py-3.5">
+                  <Car size={16} color="#9ca3af" strokeWidth={2} />
+                  <View className="flex-1 gap-0.5">
+                    <Text size="xs" className="text-muted-foreground">Vehicle Type</Text>
+                    <Text size="sm" weight="medium" className="text-foreground">
+                      {profileData.vehicleInfo.vehicleType.charAt(0).toUpperCase() + profileData.vehicleInfo.vehicleType.slice(1)}
+                    </Text>
+                  </View>
+                </View>
+                <View className="h-px bg-border/40 mx-4" />
+                <View className="flex-row items-center gap-3 px-4 py-3.5">
+                  <FileText size={16} color="#9ca3af" strokeWidth={2} />
+                  <View className="flex-1 gap-0.5">
+                    <Text size="xs" className="text-muted-foreground">Plate Number</Text>
+                    <Text size="sm" weight="medium" className="text-foreground">{profileData.vehicleInfo.plateNumber}</Text>
+                  </View>
+                </View>
+                <View className="h-px bg-border/40 mx-4" />
+                <View className="flex-row items-center gap-3 px-4 py-3.5">
+                  <Car size={16} color="#9ca3af" strokeWidth={2} />
+                  <View className="flex-1 gap-0.5">
+                    <Text size="xs" className="text-muted-foreground">Model & Color</Text>
+                    <Text size="sm" weight="medium" className="text-foreground">
+                      {profileData.vehicleInfo.vehicleModel} · {profileData.vehicleInfo.vehicleColor}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+              <TouchableOpacity
+                className="flex-row items-center justify-center gap-1.5 py-2"
+                onPress={() => router.push('/driver-status')}
+              >
+                <Edit3 size={13} color={PRIMARY_GREEN} strokeWidth={2.5} />
+                <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
+                  View Application Status
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {/* ===== ACCOUNT DETAILS ===== */}
           <View className="gap-2">
@@ -194,14 +277,14 @@ export default function DriverProfile() {
               <ProfileField
                 icon={<User size={16} color="#9ca3af" strokeWidth={2} />}
                 label="Full Name"
-                value={MOCK_DRIVER.fullName}
+                value={profileData.fullName}
                 onEdit={() => router.push('/edit-profile')}
               />
               <View className="h-px bg-border/40 mx-4" />
               <ProfileField
                 icon={<Mail size={16} color="#9ca3af" strokeWidth={2} />}
                 label="Email"
-                value={MOCK_DRIVER.email}
+                value={profileData.email}
                 onEdit={() => router.push('/edit-profile')}
                 sensitiveNote="Requires password confirmation"
               />
@@ -209,7 +292,7 @@ export default function DriverProfile() {
               <ProfileField
                 icon={<Phone size={16} color="#9ca3af" strokeWidth={2} />}
                 label="Mobile"
-                value={MOCK_DRIVER.phone}
+                value={profileData.phone}
                 onEdit={() => router.push('/edit-profile')}
                 sensitiveNote="Requires password confirmation"
               />
@@ -386,8 +469,8 @@ export default function DriverProfile() {
 
           {/* ===== FOOTER ===== */}
           <View className="items-center gap-1 pt-4">
-            <Text size="xs" className="text-muted-foreground">PATULOD · Version 1.0.0 · Phase 0.5</Text>
-            <Text size="xs" className="text-muted-foreground">Role: {MOCK_DRIVER.role}</Text>
+            <Text size="xs" className="text-muted-foreground">PATULOD · Version 1.0.0</Text>
+            <Text size="xs" className="text-muted-foreground">Role: {profileData.role}</Text>
           </View>
 
           <View style={{ height: 8 }} />
