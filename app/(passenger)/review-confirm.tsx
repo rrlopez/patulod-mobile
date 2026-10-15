@@ -1,39 +1,22 @@
-import { ScrollView, View } from 'react-native';
+import { ScrollView, View, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Text } from 'panelui-native';
+import { useStore } from '@tanstack/react-store';
 import {
   ArrowLeft,
   MapPin,
   Navigation,
   Banknote,
-  Users,
   CheckCircle2,
-  AlertCircle,
   Clock,
 } from 'lucide-react-native';
+import { bookingStore, bookingActions } from '../../lib/stores/booking-store';
+import { authStore } from '../../lib/store';
+import { confirmBooking } from '../../lib/api/bookings';
 
 const PRIMARY_GREEN = '#0d5f3a';
-
-/**
- * Mock booking summary — in Phase 2 this comes from TanStack Store
- * accumulated across the booking flow screens.
- */
-const MOCK_SUMMARY = {
-  pickup: 'Brgy. San Julian, Laoag City',
-  destination: 'City Hall, F.R. Castro Ave, Laoag City',
-  serviceType: 'Motorcycle',
-  serviceIcon: '🏍️',
-  passengerCount: 1,
-  distanceKm: 3.2,
-  fareEstimate: 56,
-  fareType: 'ESTIMATED' as const,
-  paymentMethod: 'Cash',
-  baseFare: 30,
-  perKmRate: 8,
-  etaMinutes: '2–5',
-};
 
 /**
  * Review & Confirm Screen
@@ -47,15 +30,71 @@ const MOCK_SUMMARY = {
 export default function ReviewConfirm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  
+  // ALL HOOKS AT THE TOP
   const [isConfirming, setIsConfirming] = useState(false);
+  
+  // Get booking data from store
+  const booking = useStore(bookingStore, (state) => state.activeBooking);
+  const draftBooking = useStore(bookingStore, (state) => state.draftBooking);
+  const user = useStore(authStore, (state) => state.user);
 
-  function handleConfirm() {
+  // Service type display
+  const serviceTypeMap: Record<string, { label: string; icon: string }> = {
+    'MOTORCYCLE': { label: 'Motorcycle', icon: '🏍️' },
+    'TRICYCLE': { label: 'Tricycle', icon: '🛺' },
+    'SEDAN': { label: 'Sedan', icon: '🚗' },
+  };
+  
+  const serviceInfo = draftBooking.serviceType 
+    ? serviceTypeMap[draftBooking.serviceType] || { label: draftBooking.serviceType, icon: '🚗' }
+    : { label: 'Unknown', icon: '🚗' };
+
+  // Redirect if no booking data (after all hooks)
+  useEffect(() => {
+    if (!booking?.bookingId || !draftBooking.serviceType) {
+      router.replace('/(passenger)/booking');
+    }
+  }, [booking?.bookingId, draftBooking.serviceType, router]);
+
+  async function handleConfirm() {
+    if (!user?.id || !booking.bookingId) {
+      Alert.alert('Error', 'Missing user or booking information');
+      return;
+    }
+
     setIsConfirming(true);
-    // Mock: simulate booking submission delay then navigate to searching screen
-    setTimeout(() => {
+    
+    try {
+      const result = await confirmBooking(booking.bookingId, user.id);
+      
+      if (result.success) {
+        // Update store
+        bookingActions.setCurrentScreen('searching');
+        // Navigate to searching screen
+        router.push('/(passenger)/searching');
+      } else {
+        Alert.alert(
+          'Confirmation Failed',
+          result.message || 'Unable to confirm booking. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Confirm booking error:', error);
+      Alert.alert(
+        'Error',
+        'An unexpected error occurred. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
       setIsConfirming(false);
-      router.push('/(passenger)/searching');
-    }, 1500);
+    }
+  }
+
+  // Prevent rendering if data is missing (will redirect via useEffect)
+  if (!booking?.bookingId || !draftBooking.serviceType) {
+    return null;
   }
 
   return (
@@ -105,11 +144,11 @@ export default function ReviewConfirm() {
                 <View className="flex-1 gap-3">
                   <View>
                     <Text size="xs" weight="bold" className="text-muted-foreground">PICKUP</Text>
-                    <Text size="sm" weight="medium" className="text-foreground">{MOCK_SUMMARY.pickup}</Text>
+                    <Text size="sm" weight="medium" className="text-foreground">{draftBooking.pickupAddress}</Text>
                   </View>
                   <View>
                     <Text size="xs" weight="bold" className="text-muted-foreground">DESTINATION</Text>
-                    <Text size="sm" weight="medium" className="text-foreground">{MOCK_SUMMARY.destination}</Text>
+                    <Text size="sm" weight="medium" className="text-foreground">{draftBooking.destinationAddress}</Text>
                   </View>
                 </View>
               </View>
@@ -117,11 +156,11 @@ export default function ReviewConfirm() {
               <View className="flex-row items-center gap-4 pt-1">
                 <View className="flex-row items-center gap-1.5">
                   <Navigation size={13} color="#9ca3af" strokeWidth={2} />
-                  <Text size="xs" className="text-muted-foreground">~{MOCK_SUMMARY.distanceKm} km</Text>
+                  <Text size="xs" className="text-muted-foreground">~{booking.distanceKm?.toFixed(1) || '0.0'} km</Text>
                 </View>
                 <View className="flex-row items-center gap-1.5">
                   <Clock size={13} color="#9ca3af" strokeWidth={2} />
-                  <Text size="xs" className="text-muted-foreground">Driver in ~{MOCK_SUMMARY.etaMinutes} min</Text>
+                  <Text size="xs" className="text-muted-foreground">Driver in ~2–5 min</Text>
                 </View>
               </View>
             </View>
@@ -135,21 +174,21 @@ export default function ReviewConfirm() {
                   className="h-12 w-12 rounded-2xl items-center justify-center"
                   style={{ backgroundColor: 'rgba(13, 95, 58, 0.08)' }}
                 >
-                  <Text style={{ fontSize: 24 }}>{MOCK_SUMMARY.serviceIcon}</Text>
+                  <Text style={{ fontSize: 24 }}>{serviceInfo.icon}</Text>
                 </View>
                 <View>
                   <Text size="base" weight="bold" className="text-foreground">
-                    {MOCK_SUMMARY.serviceType}
+                    {serviceInfo.label}
                   </Text>
                   <Text size="xs" className="text-muted-foreground">
-                    {MOCK_SUMMARY.passengerCount} passenger{MOCK_SUMMARY.passengerCount > 1 ? 's' : ''}
+                    {draftBooking.passengerCount} passenger{draftBooking.passengerCount > 1 ? 's' : ''}
                   </Text>
                 </View>
               </View>
               <View className="items-end gap-0.5">
                 <Text size="xs" className="text-muted-foreground">Est. arrival</Text>
                 <Text size="sm" weight="semibold" style={{ color: PRIMARY_GREEN }}>
-                  {MOCK_SUMMARY.etaMinutes} min
+                  2–5 min
                 </Text>
               </View>
             </View>
@@ -162,17 +201,21 @@ export default function ReviewConfirm() {
               <View className="flex-row items-center justify-between">
                 <View>
                   <Text size="sm" weight="medium" className="text-muted-foreground">Estimated total</Text>
-                  <Text size="xs" className="text-muted-foreground">Base ₱{MOCK_SUMMARY.baseFare} + ₱{MOCK_SUMMARY.perKmRate}/km × {MOCK_SUMMARY.distanceKm} km</Text>
+                  <Text size="xs" className="text-muted-foreground">
+                    Base ₱{booking.breakdown?.baseFare || 0} + ₱{booking.breakdown?.distanceCharge.toFixed(2) || '0.00'} distance
+                  </Text>
                 </View>
                 <View className="items-end">
                   <Text size="2xl" weight="bold" style={{ color: PRIMARY_GREEN }}>
-                    ₱{MOCK_SUMMARY.fareEstimate}
+                    ₱{booking.fareEstimate || 0}
                   </Text>
                   <View
                     className="rounded-full px-2 py-0.5"
-                    style={{ backgroundColor: 'rgba(251, 191, 36, 0.15)' }}
+                    style={{ backgroundColor: booking.fareType === 'FIXED' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(251, 191, 36, 0.15)' }}
                   >
-                    <Text size="xs" weight="medium" style={{ color: '#92400e' }}>Estimated</Text>
+                    <Text size="xs" weight="medium" style={{ color: booking.fareType === 'FIXED' ? '#15803d' : '#92400e' }}>
+                      {booking.fareType === 'FIXED' ? 'Fixed' : 'Estimated'}
+                    </Text>
                   </View>
                 </View>
               </View>
@@ -183,7 +226,7 @@ export default function ReviewConfirm() {
               <View className="flex-row items-center gap-3">
                 <Banknote size={20} color={PRIMARY_GREEN} strokeWidth={2} />
                 <Text size="sm" weight="medium" className="text-foreground">
-                  Cash — pay driver at trip end
+                  {draftBooking.paymentMethod} — pay driver at trip end
                 </Text>
               </View>
             </View>

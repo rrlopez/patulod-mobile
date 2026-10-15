@@ -1,8 +1,9 @@
-import { View, TouchableOpacity } from 'react-native';
+import { View, TouchableOpacity, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Text, Button } from 'panelui-native';
+import { useStore } from '@tanstack/react-store';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -11,40 +12,95 @@ import Animated, {
   withDelay,
   Easing,
   FadeIn,
-  FadeOut,
 } from 'react-native-reanimated';
 import { MapPin, X, RefreshCw } from 'lucide-react-native';
+import { bookingStore, bookingActions } from '../../lib/stores/booking-store';
+import { authStore } from '../../lib/store';
+import { getActiveBooking, cancelBooking } from '../../lib/api/bookings';
 
 const PRIMARY_GREEN = '#0d5f3a';
 
-/** Mock: how long to search before timeout (ms) */
-const SEARCH_TIMEOUT_MS = 12000;
-/** Mock: how long before a driver is "found" (ms) */
-const DRIVER_FOUND_MS = 5000;
+/** How often to poll for booking updates (ms) */
+const POLL_INTERVAL_MS = 3000; // Every 3 seconds
+/** Max search time before showing timeout (ms) */
+const SEARCH_TIMEOUT_MS = 60000; // 60 seconds
 
 type SearchState = 'searching' | 'found' | 'timeout';
 
 /**
  * Searching for Driver Screen
- * Phase 0.5 — Mock UI
+ * Phase 2 — Real API Integration
  *
  * Per master-plan.md Phase 2:
- * - Animated searching indicator
- * - Cancel option
- * - Timeout message with retry path
- * - On found: navigate to driver-assigned screen
+ * - Poll for booking status updates
+ * - Show driver found when status changes to DRIVER_ASSIGNED
+ * - Allow cancellation (no fee while searching)
+ * - Timeout with retry option
  */
 export default function Searching() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  
+  // ALL HOOKS MUST BE AT THE TOP, BEFORE ANY CONDITIONAL RETURNS
   const [state, setState] = useState<SearchState>('searching');
   const [elapsed, setElapsed] = useState(0);
+  const [isCancelling, setIsCancelling] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
   // Pulse rings animation values
   const ring1 = useSharedValue(0);
   const ring2 = useSharedValue(0);
   const ring3 = useSharedValue(0);
+  
+  // Get data from store
+  const booking = useStore(bookingStore, (state) => state.activeBooking);
+  const draftBooking = useStore(bookingStore, (state) => state.draftBooking);
+  const user = useStore(authStore, (state) => state.user);
+
+  // Redirect if no booking data (must be after all hooks)
+  useEffect(() => {
+    if (!booking?.bookingId || !user?.id) {
+      router.replace('/(passenger)/booking');
+    }
+  }, [booking?.bookingId, user?.id, router]);
+
+  // Poll for booking status updates
+  async function checkBookingStatus() {
+    if (!user?.id) return;
+    
+    try {
+      const result = await getActiveBooking(user.id);
+      
+      if (result.success && result.data) {
+        const bookingData = result.data;
+        
+        // Update store with latest booking data
+        bookingActions.setActiveBooking({
+          ...booking,
+          status: bookingData.status,
+          trip: bookingData.trip,
+        });
+        
+        // Check if driver has been assigned
+        if (bookingData.status === 'DRIVER_ASSIGNED' && bookingData.trip?.driverId) {
+          setState('found');
+        }
+        
+        // Check if booking was cancelled or completed elsewhere
+        if (['CANCELLED', 'COMPLETED'].includes(bookingData.status)) {
+          router.replace('/(passenger)/home');
+        }
+      } else {
+        // 404 means no active booking found - this is normal if booking was just cancelled
+        // or if the backend hasn't created the booking event yet
+        console.log('No active booking found (this is normal during initial search)');
+      }
+    } catch (error) {
+      console.error('Error polling booking status:', error);
+      // Don't show error to user - just keep searching
+    }
+  }
 
   useEffect(() => {
     // Start pulse animations staggered
@@ -67,36 +123,100 @@ export default function Searching() {
       setElapsed(e => e + 1);
     }, 1000);
 
-    // Mock: driver found after DRIVER_FOUND_MS
-    const foundTimer = setTimeout(() => {
-      setState('found');
-    }, DRIVER_FOUND_MS);
+    // Start polling for status updates
+    pollRef.current = setInterval(checkBookingStatus, POLL_INTERVAL_MS);
+    checkBookingStatus(); // Check immediately
 
-    // Mock: timeout after SEARCH_TIMEOUT_MS
+    // Timeout after max search time
     const timeoutTimer = setTimeout(() => {
       setState(s => s === 'searching' ? 'timeout' : s);
     }, SEARCH_TIMEOUT_MS);
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      clearTimeout(foundTimer);
+      if (pollRef.current) clearInterval(pollRef.current);
       clearTimeout(timeoutTimer);
     };
   }, []);
 
-  // Stop elapsed counter when no longer searching
+  // Stop timers when no longer searching
   useEffect(() => {
-    if (state !== 'searching' && timerRef.current) {
-      clearInterval(timerRef.current);
+    if (state !== 'searching') {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (pollRef.current) clearInterval(pollRef.current);
     }
+    
     // Auto-navigate when driver found
     if (state === 'found') {
       const nav = setTimeout(() => {
+        bookingActions.setCurrentScreen('driver-assigned');
         router.replace('/(passenger)/driver-assigned');
       }, 1800);
       return () => clearTimeout(nav);
     }
   }, [state]);
+
+  // Handle cancellation
+  async function handleCancel() {
+    if (!booking.bookingId || !user?.id) return;
+    
+    Alert.alert(
+      'Cancel Search',
+      'Are you sure you want to cancel? You can cancel at no charge while searching.',
+      [
+        { text: 'Keep Searching', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            setIsCancelling(true);
+            
+            try {
+              const result = await cancelBooking(
+                booking.bookingId!,
+                user.id,
+                'No driver found'
+              );
+              
+              console.log('Cancel booking result:', result);
+              
+              if (result.success) {
+                bookingActions.setActiveBooking(null);
+                bookingActions.clearDraftBooking();
+                router.replace('/(passenger)/home');
+              } else {
+                const errorMsg = result.errors 
+                  ? Object.values(result.errors).join(', ')
+                  : result.message || 'Unable to cancel booking. Please try again.';
+                
+                console.error('Cancellation failed:', result);
+                
+                Alert.alert(
+                  'Cancellation Failed',
+                  errorMsg,
+                  [{ text: 'OK' }]
+                );
+              }
+            } catch (error) {
+              console.error('Cancel error:', error);
+              Alert.alert('Error', 'An unexpected error occurred.');
+            } finally {
+              setIsCancelling(false);
+            }
+          },
+        },
+      ]
+    );
+  }
+
+  // Handle retry after timeout
+  function handleRetry() {
+    setState('searching');
+    setElapsed(0);
+    // Restart polling
+    pollRef.current = setInterval(checkBookingStatus, POLL_INTERVAL_MS);
+    checkBookingStatus();
+  }
 
   // Animated ring styles
   function ringStyle(val: typeof ring1, size: number) {
@@ -116,6 +236,11 @@ export default function Searching() {
   const r3Style = ringStyle(ring3, 80);
 
   const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
+
+  // Prevent rendering if data is missing (will redirect via useEffect)
+  if (!booking?.bookingId || !user?.id) {
+    return null;
+  }
 
   // ── Timeout state ─────────────────────────────────────────────
   if (state === 'timeout') {
@@ -146,7 +271,7 @@ export default function Searching() {
             size="lg"
             className="w-full"
             style={{ backgroundColor: PRIMARY_GREEN }}
-            onPress={() => { setState('searching'); setElapsed(0); }}
+            onPress={handleRetry}
           >
             <View className="flex-row items-center gap-2">
               <RefreshCw size={18} color="#fff" strokeWidth={2.5} />
@@ -158,15 +283,15 @@ export default function Searching() {
             variant="outline"
             className="w-full"
             style={{ borderColor: PRIMARY_GREEN }}
-            onPress={() => router.replace('/(passenger)/home')}
+            onPress={() => {
+              bookingActions.setActiveBooking(null);
+              bookingActions.clearDraftBooking();
+              router.replace('/(passenger)/home');
+            }}
           >
             <Text size="base" weight="semibold" style={{ color: PRIMARY_GREEN }}>Back to Home</Text>
           </Button>
         </View>
-
-        <Text size="xs" className="text-muted-foreground text-center">
-          Phase 0.5 — Mock timeout state
-        </Text>
       </View>
     );
   }
@@ -211,9 +336,11 @@ export default function Searching() {
       >
         <MapPin size={16} color="#ef4444" strokeWidth={2.5} />
         <Text size="xs" className="text-muted-foreground flex-1" numberOfLines={1}>
-          City Hall, F.R. Castro Ave, Laoag City
+          {draftBooking.destinationAddress}
         </Text>
-        <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>₱56 est.</Text>
+        <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
+          ₱{booking.fareEstimate} est.
+        </Text>
       </View>
 
       {/* Center: animation */}
@@ -280,12 +407,15 @@ export default function Searching() {
           size="lg"
           variant="outline"
           className="w-full"
-          style={{ borderColor: '#ef4444', borderWidth: 1.5 }}
-          onPress={() => router.replace('/(passenger)/home')}
+          style={{ borderColor: '#ef4444', borderWidth: 1.5, opacity: isCancelling ? 0.6 : 1 }}
+          onPress={handleCancel}
+          disabled={isCancelling}
         >
           <View className="flex-row items-center gap-2">
             <X size={18} color="#ef4444" strokeWidth={2.5} />
-            <Text size="base" weight="semibold" style={{ color: '#ef4444' }}>Cancel Search</Text>
+            <Text size="base" weight="semibold" style={{ color: '#ef4444' }}>
+              {isCancelling ? 'Cancelling...' : 'Cancel Search'}
+            </Text>
           </View>
         </Button>
       </View>

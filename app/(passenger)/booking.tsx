@@ -1,8 +1,9 @@
-import { View, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView, Platform, Keyboard, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button, Text } from 'panelui-native';
+import { useStore } from '@tanstack/react-store';
 import {
   ArrowLeft,
   MapPin,
@@ -11,23 +12,73 @@ import {
   ChevronRight,
   LocateFixed,
   ArrowDownUp,
-  Clock,
 } from 'lucide-react-native';
+import { bookingStore, bookingActions } from '../../lib/stores/booking-store';
+import * as Location from 'expo-location';
 
 const PRIMARY_GREEN = '#0d5f3a';
 
-/** Mock recent/saved places */
+/** Mock recent/saved places with real Nueva Vizcaya coordinates */
 const SUGGESTIONS = [
-  { id: '1', label: 'City Hall', address: 'F.R. Castro Ave, Laoag City', icon: '🏛️' },
-  { id: '2', label: 'Ilocos Norte Capitol', address: 'Brgy. 1, Laoag City', icon: '🏛️' },
-  { id: '3', label: 'Laoag Public Market', address: 'Brgy. 2, Laoag City', icon: '🛒' },
-  { id: '4', label: 'Marcos International Airport', address: 'Brgy. 35, Laoag City', icon: '✈️' },
-  { id: '5', label: 'Ilocos Norte Provincial Hospital', address: 'Brgy. San Matias, Laoag City', icon: '🏥' },
+  { 
+    id: '1', 
+    label: 'Bayombong Town Hall', 
+    address: 'Poblacion, Bayombong, Nueva Vizcaya', 
+    icon: '🏛️',
+    lat: 16.4833,
+    lng: 121.1500,
+  },
+  { 
+    id: '2', 
+    label: 'Nueva Vizcaya State University', 
+    address: 'Bayombong, Nueva Vizcaya', 
+    icon: '🎓',
+    lat: 16.4900,
+    lng: 121.1450,
+  },
+  { 
+    id: '3', 
+    label: 'Bambang Public Market', 
+    address: 'Poblacion, Bambang, Nueva Vizcaya', 
+    icon: '🛒',
+    lat: 16.3833,
+    lng: 121.1000,
+  },
+  { 
+    id: '4', 
+    label: 'Solano Town Center', 
+    address: 'Poblacion, Solano, Nueva Vizcaya', 
+    icon: '🏢',
+    lat: 16.5167,
+    lng: 121.1833,
+  },
+  { 
+    id: '5', 
+    label: 'Region 2 Trauma and Medical Center', 
+    address: 'Bayombong, Nueva Vizcaya', 
+    icon: '🏥',
+    lat: 16.4880,
+    lng: 121.1520,
+  },
 ];
 
 const RECENT = [
-  { id: '1', label: 'Home', address: 'Brgy. San Julian, Laoag City', icon: '🏠' },
-  { id: '2', label: 'Work', address: 'City Hall, F.R. Castro Ave', icon: '🏢' },
+  { 
+    id: '1', 
+    label: 'Home', 
+    address: 'Brgy. Vista Alegre, Bayombong', 
+    icon: '🏠',
+    lat: 16.4750,
+    lng: 121.1400,
+  },
+  { 
+    id: '2', 
+    label: 'Work', 
+    address: 'Provincial Capitol, Bayombong', 
+    icon: '🏢',
+    lat: 16.4850,
+    lng: 121.1480,
+  },
 ];
 
 /**
@@ -43,11 +94,13 @@ const RECENT = [
 export default function Booking() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const draftBooking = useStore(bookingStore, (state) => state.draftBooking);
 
-  const [pickup, setPickup] = useState('');
-  const [destination, setDestination] = useState('');
+  const [pickup, setPickup] = useState(draftBooking.pickupAddress);
+  const [destination, setDestination] = useState(draftBooking.destinationAddress);
   const [activeField, setActiveField] = useState<'pickup' | 'destination' | null>(null);
   const [usingCurrentLocation, setUsingCurrentLocation] = useState(false);
+  const [loadingLocation, setLoadingLocation] = useState(false);
 
   const pickupDisplay = usingCurrentLocation ? 'Current Location (GPS)' : pickup;
   const canProceed = (pickup.trim().length > 0 || usingCurrentLocation) && destination.trim().length > 0;
@@ -55,10 +108,51 @@ export default function Booking() {
   // Which suggestions to show based on active field
   const activeSuggestions = activeField === 'destination' ? SUGGESTIONS : RECENT;
 
-  function handleUseCurrentLocation() {
-    setUsingCurrentLocation(true);
-    setPickup('');
-    setActiveField(null);
+  async function handleUseCurrentLocation() {
+    setLoadingLocation(true);
+    try {
+      // Request location permission
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Location permission is required to use your current location');
+        setLoadingLocation(false);
+        return;
+      }
+
+      // Get current location
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      // Get address from coordinates (reverse geocoding)
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (addresses.length > 0) {
+        const addr = addresses[0];
+        const addressStr = [addr.street, addr.city, addr.region].filter(Boolean).join(', ');
+        setPickup(addressStr || 'Current Location');
+      } else {
+        setPickup('Current Location');
+      }
+
+      // Update store
+      bookingActions.updateDraftBooking({
+        pickupAddress: 'Current Location (GPS)',
+        pickupLat: location.coords.latitude,
+        pickupLng: location.coords.longitude,
+      });
+
+      setUsingCurrentLocation(true);
+      setActiveField(null);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      alert('Failed to get your current location. Please enter manually.');
+    } finally {
+      setLoadingLocation(false);
+    }
   }
 
   function handleSwap() {
@@ -69,16 +163,64 @@ export default function Booking() {
   }
 
   function handleSuggestion(label: string, address: string) {
+    const fullAddress = `${label} — ${address}`;
+    
+    // Find the suggestion to get coordinates
+    const suggestion = [...SUGGESTIONS, ...RECENT].find(
+      s => s.label === label && s.address === address
+    );
+    
     if (activeField === 'pickup') {
-      setPickup(`${label} — ${address}`);
+      setPickup(fullAddress);
       setUsingCurrentLocation(false);
+      
+      // Update store with real coordinates
+      if (suggestion) {
+        bookingActions.updateDraftBooking({
+          pickupAddress: fullAddress,
+          pickupLat: suggestion.lat,
+          pickupLng: suggestion.lng,
+        });
+      }
     } else if (activeField === 'destination') {
-      setDestination(`${label} — ${address}`);
+      setDestination(fullAddress);
+      
+      // Update store with real coordinates
+      if (suggestion) {
+        bookingActions.updateDraftBooking({
+          destinationAddress: fullAddress,
+          destinationLat: suggestion.lat,
+          destinationLng: suggestion.lng,
+        });
+      }
     }
+    
+    // Clear active field to show map preview and dismiss keyboard
     setActiveField(null);
+    Keyboard.dismiss();
   }
 
   function handleContinue() {
+    // If manual entry (not from suggestions), use center of Bayombong, Nueva Vizcaya as fallback
+    if (!usingCurrentLocation && !draftBooking.pickupLat) {
+      bookingActions.updateDraftBooking({
+        pickupAddress: pickup,
+        // Center of Bayombong (capital of Nueva Vizcaya) as fallback
+        pickupLat: 16.4833,
+        pickupLng: 121.1500,
+      });
+    }
+    
+    if (!draftBooking.destinationLat) {
+      bookingActions.updateDraftBooking({
+        destinationAddress: destination,
+        // Center of Bayombong as fallback
+        destinationLat: 16.4850,
+        destinationLng: 121.1520,
+      });
+    }
+
+    bookingActions.setCurrentScreen('service-select');
     router.push('/(passenger)/service-select');
   }
 
@@ -193,10 +335,11 @@ export default function Booking() {
             <TouchableOpacity
               className="flex-row items-center gap-2 self-start px-1"
               onPress={handleUseCurrentLocation}
+              disabled={loadingLocation}
             >
               <LocateFixed size={15} color={PRIMARY_GREEN} strokeWidth={2.5} />
               <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
-                Use my current location as pickup
+                {loadingLocation ? 'Getting location...' : 'Use my current location as pickup'}
               </Text>
             </TouchableOpacity>
           )}
@@ -211,9 +354,23 @@ export default function Booking() {
           {activeField ? (
             /* Suggestions list */
             <View className="px-5 gap-3">
-              <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-                {activeField === 'pickup' ? 'Recent Places' : 'Suggestions'}
-              </Text>
+              <View className="flex-row items-center justify-between">
+                <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
+                  {activeField === 'pickup' ? 'Recent Places' : 'Suggestions'}
+                </Text>
+                <TouchableOpacity 
+                  onPress={() => {
+                    setActiveField(null);
+                    Keyboard.dismiss();
+                  }}
+                  className="px-3 py-1 rounded-full"
+                  style={{ backgroundColor: 'rgba(13, 95, 58, 0.1)' }}
+                >
+                  <Text size="xs" weight="semibold" style={{ color: PRIMARY_GREEN }}>
+                    Done
+                  </Text>
+                </TouchableOpacity>
+              </View>
               <View
                 className="rounded-2xl overflow-hidden"
                 style={{ borderWidth: 1, borderColor: '#e5e5e3' }}
@@ -245,67 +402,105 @@ export default function Booking() {
               </View>
             </View>
           ) : (
-            /* Mock map pin view */
+            /* Static Map Preview */
             <View className="px-5 gap-4">
               <Text size="xs" weight="bold" className="text-muted-foreground uppercase tracking-wider">
-                Map Preview
+                Route Preview
               </Text>
 
-              {/* Mock map */}
+              {/* Map Container */}
               <View
-                className="rounded-3xl overflow-hidden items-center justify-center"
-                style={{ height: 220, backgroundColor: '#e8f0e9' }}
+                style={{ 
+                  height: 300, 
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                  backgroundColor: '#f0f0f0',
+                }}
               >
-                {/* Mock map grid */}
-                <View className="absolute inset-0 opacity-30">
-                  {[0,1,2,3,4,5].map(i => (
-                    <View key={`h${i}`} className="absolute w-full h-px bg-green-700" style={{ top: `${i * 20}%` }} />
-                  ))}
-                  {[0,1,2,3,4,5,6].map(i => (
-                    <View key={`v${i}`} className="absolute h-full w-px bg-green-700" style={{ left: `${i * 16.6}%` }} />
-                  ))}
-                </View>
-
-                {/* Route line mock */}
-                {canProceed && (
-                  <View
-                    className="absolute rounded-full opacity-40"
-                    style={{
-                      width: 120, height: 3,
-                      backgroundColor: PRIMARY_GREEN,
-                      transform: [{ rotate: '-15deg' }],
-                    }}
-                  />
-                )}
-
-                {/* Pickup pin */}
-                <View className="absolute items-center" style={{ top: '35%', left: '30%' }}>
-                  <View
-                    className="h-8 w-8 rounded-full items-center justify-center"
-                    style={{ backgroundColor: PRIMARY_GREEN }}
-                  >
-                    <Navigation size={14} color="#fff" strokeWidth={2.5} />
+                {canProceed && draftBooking.pickupLat && draftBooking.destinationLat ? (
+                  <>
+                    {/* Static map from OpenStreetMap (no API key needed) */}
+                    <Image
+                      source={{
+                        uri: `https://staticmap.openstreetmap.de/staticmap.php?center=${
+                          (draftBooking.pickupLat + draftBooking.destinationLat) / 2
+                        },${
+                          (draftBooking.pickupLng + draftBooking.destinationLng) / 2
+                        }&zoom=12&size=600x400&maptype=mapnik&markers=${
+                          draftBooking.pickupLat
+                        },${
+                          draftBooking.pickupLng
+                        },greena|${
+                          draftBooking.destinationLat
+                        },${
+                          draftBooking.destinationLng
+                        },redb`
+                      }}
+                      style={{ flex: 1 }}
+                      resizeMode="cover"
+                    />
+                    
+                    {/* Overlay with route info */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        left: 12,
+                        right: 12,
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        borderRadius: 12,
+                        padding: 12,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: PRIMARY_GREEN,
+                        }}
+                      />
+                      <Text size="xs" weight="medium" style={{ flex: 1 }} numberOfLines={1}>
+                        {pickup.length > 35 ? pickup.substring(0, 35) + '...' : pickup}
+                      </Text>
+                      <View style={{ width: 16, height: 1, backgroundColor: '#d1d5db' }} />
+                      <View
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: 4,
+                          backgroundColor: '#ef4444',
+                        }}
+                      />
+                    </View>
+                  </>
+                ) : (
+                  /* Empty state */
+                  <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+                    <View
+                      style={{
+                        width: 80,
+                        height: 80,
+                        borderRadius: 40,
+                        backgroundColor: 'rgba(13, 95, 58, 0.1)',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginBottom: 16,
+                      }}
+                    >
+                      <MapPin size={36} color={PRIMARY_GREEN} strokeWidth={2} />
+                    </View>
+                    <Text size="sm" weight="semibold" className="text-foreground text-center mb-2">
+                      Select Your Route
+                    </Text>
+                    <Text size="xs" className="text-muted-foreground text-center">
+                      Choose pickup and destination to preview your route on the map
+                    </Text>
                   </View>
-                  <View
-                    className="w-2 h-2 rounded-full -mt-1"
-                    style={{ backgroundColor: PRIMARY_GREEN }}
-                  />
-                </View>
-
-                {/* Destination pin */}
-                <View className="absolute items-center" style={{ top: '50%', left: '58%' }}>
-                  <MapPin size={28} color="#ef4444" strokeWidth={2.5} />
-                </View>
-
-                {/* Map label */}
-                <View
-                  className="absolute bottom-3 right-3 rounded-lg px-2 py-1"
-                  style={{ backgroundColor: 'rgba(255,255,255,0.85)' }}
-                >
-                  <Text size="xs" weight="medium" className="text-muted-foreground">
-                    Mock map • Phase 0.5
-                  </Text>
-                </View>
+                )}
               </View>
 
               {/* Location summary */}
@@ -336,15 +531,6 @@ export default function Booking() {
                       </Text>
                     </View>
                   </View>
-                </View>
-              )}
-
-              {/* Empty state */}
-              {!canProceed && (
-                <View className="items-center gap-2 py-4">
-                  <Text size="sm" className="text-muted-foreground text-center">
-                    Enter a pickup location and destination to see your route.
-                  </Text>
                 </View>
               )}
             </View>

@@ -3,7 +3,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Button, Text } from 'panelui-native';
+import { useStore } from '@tanstack/react-store';
 import { ArrowLeft, Users, CheckCircle2, Minus, Plus } from 'lucide-react-native';
+import { bookingStore, bookingActions } from '../../lib/stores/booking-store';
 
 const PRIMARY_GREEN = '#0d5f3a';
 const ACCENT_YELLOW = '#fbbf24';
@@ -14,7 +16,7 @@ const ACCENT_YELLOW = '#fbbf24';
  */
 const SERVICE_TYPES = [
   {
-    id: 'motorcycle',
+    id: 'MOTORCYCLE',
     label: 'Motorcycle',
     icon: '🏍️',
     description: 'Fast and affordable for solo trips',
@@ -25,7 +27,7 @@ const SERVICE_TYPES = [
     available: true,
   },
   {
-    id: 'tricycle',
+    id: 'TRICYCLE',
     label: 'Tricycle',
     icon: '🛺',
     description: 'Comfortable for small groups and errands',
@@ -36,7 +38,7 @@ const SERVICE_TYPES = [
     available: true,
   },
   {
-    id: 'van',
+    id: 'VAN',
     label: 'Van / FX',
     icon: '🚐',
     description: 'Spacious for larger groups or cargo',
@@ -60,9 +62,10 @@ const SERVICE_TYPES = [
 export default function ServiceSelect() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const draftBooking = useStore(bookingStore, (state) => state.draftBooking);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [passengerCount, setPassengerCount] = useState(1);
+  const [selectedId, setSelectedId] = useState<string | null>(draftBooking.serviceType || null);
+  const [passengerCount, setPassengerCount] = useState(draftBooking.passengerCount || 1);
 
   const selected = SERVICE_TYPES.find(s => s.id === selectedId);
   const overCapacity = selected ? passengerCount > selected.capacity : false;
@@ -81,6 +84,19 @@ export default function ServiceSelect() {
     setSelectedId(id);
     // Reset count to 1 when switching vehicle type
     setPassengerCount(1);
+  }
+
+  function handleContinue() {
+    if (!selected) return;
+
+    // Save to store
+    bookingActions.updateDraftBooking({
+      serviceType: selected.id,
+      passengerCount,
+    });
+
+    bookingActions.setCurrentScreen('fare-estimate');
+    router.push('/(passenger)/fare-estimate');
   }
 
   return (
@@ -327,7 +343,7 @@ export default function ServiceSelect() {
           className="w-full"
           style={{ backgroundColor: canProceed ? PRIMARY_GREEN : '#9ca3af' }}
           disabled={!canProceed}
-          onPress={() => router.push('/(passenger)/fare-estimate')}
+          onPress={handleContinue}
         >
           <Text size="base" weight="bold" className="text-white">
             {canProceed ? `Continue with ${selected!.label}` : 'Select a vehicle type'}
